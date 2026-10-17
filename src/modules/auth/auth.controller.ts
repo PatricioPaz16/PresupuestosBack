@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -41,10 +41,10 @@ export class AuthController {
     private readonly configService: ConfigService,
   ) {}
 
+  // Límite configurable con THROTTLE_LOGIN_LIMIT / THROTTLE_LOGIN_TTL_MS (AuthModule).
   @Public()
   @HttpCode(HttpStatus.OK)
   @UseGuards(ThrottlerGuard)
-  @Throttle({ login: { limit: 5, ttl: 60000 } })
   @Post('login')
   @ApiOperation({
     summary: 'Login',
@@ -83,7 +83,7 @@ export class AuthController {
       throw new UnauthorizedException('Refresh token not found');
     }
 
-    const { user, accessToken, refreshToken } =
+    const { accessToken, refreshToken } =
       await this.authService.refreshSession(rawRefreshToken);
 
     this.setAuthCookies(response, accessToken, refreshToken);

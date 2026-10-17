@@ -14,7 +14,9 @@ export class RefreshTokenService {
     private readonly configService: ConfigService,
   ) {}
 
-  async createForUser(user: User): Promise<string> {
+  async createForUser(
+    user: User,
+  ): Promise<{ rawToken: string; sessionId: string }> {
     const rawToken = randomBytes(48).toString('hex');
     const tokenHash = this.hashToken(rawToken);
     const expiresAt = new Date(
@@ -22,18 +24,30 @@ export class RefreshTokenService {
         this.configService.get<number>('jwt.refreshCookieMaxAgeMs', 604800000),
     );
 
-    await this.refreshTokenRepository.save({
+    const saved = await this.refreshTokenRepository.save({
       tokenHash,
       userId: user.id,
       expiresAt,
     });
 
-    return rawToken;
+    return { rawToken, sessionId: saved.id };
+  }
+
+  /** Sesión vigente = refresh token sin revocar y sin vencer. */
+  isSessionActive(sessionId: string): Promise<boolean> {
+    return this.refreshTokenRepository.exists({
+      where: {
+        id: sessionId,
+        revokedAt: IsNull(),
+        expiresAt: MoreThan(new Date()),
+      },
+    });
   }
 
   async validateAndRotate(rawToken: string): Promise<{
     user: User;
     newRawToken: string;
+    sessionId: string;
   }> {
     const tokenHash = this.hashToken(rawToken);
     const storedToken = await this.refreshTokenRepository.findOne({
@@ -42,21 +56,28 @@ export class RefreshTokenService {
         revokedAt: IsNull(),
         expiresAt: MoreThan(new Date()),
       },
-      relations: ['user', 'user.role'],
+      relations: ['user', 'user.role', 'user.taller'],
     });
 
-    if (!storedToken) {
+    if (
+      !storedToken ||
+      !storedToken.user.isActive ||
+      !storedToken.user.taller?.activo
+    ) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
     storedToken.revokedAt = new Date();
     await this.refreshTokenRepository.save(storedToken);
 
-    const newRawToken = await this.createForUser(storedToken.user);
+    const { rawToken: newRawToken, sessionId } = await this.createForUser(
+      storedToken.user,
+    );
 
     return {
       user: storedToken.user,
       newRawToken,
+      sessionId,
     };
   }
 

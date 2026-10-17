@@ -24,6 +24,10 @@ async function bootstrap() {
 
   app.use(helmet());
   app.use(cookieParser());
+  // El logo del taller viaja como data URL (hasta ~400 KB): el límite por defecto es 100 KB.
+  app.useBodyParser('json', {
+    limit: configService.get<string>('bodyLimit', '1mb'),
+  });
 
   app.enableCors({
     origin: configService.get<string>('frontendUrl'),

@@ -55,21 +55,17 @@ En pgAdmin ves varios servidores (por ejemplo **PostgreSQL 15**, **17**, **18**)
 
 Ya tienes la base vacía lista para el backend.
 
-### Extensión UUID (opcional en pgAdmin)
+### Extensiones
 
-El proyecto la crea con migraciones o al sincronizar. Si usas migraciones manuales y falla por UUID, en **Query Tool**:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-```
-
-Ejecutar sobre la base `back_base_nest`.
+Las migraciones crean solas las extensiones que usa el proyecto (`uuid-ossp`, `pg_trgm`
+para búsquedas rápidas y `unaccent` para que "bujia" encuentre "Bujía"). Vienen incluidas
+en el instalador de PostgreSQL para Windows; no hay que instalar nada aparte.
 
 ---
 
 ## 4. Configurar el `.env` del backend
 
-En la raíz del proyecto (`BackBaseNest`), edita `.env`:
+En la raíz del proyecto (`PresupuestosBack`), edita `.env` (si no existe, copialo de `.env.example`):
 
 ```env
 DB_HOST=localhost
@@ -78,8 +74,7 @@ DB_USERNAME=postgres
 DB_PASSWORD=TU_CONTRASEÑA_DE_POSTGRES
 DB_NAME=back_base_nest
 
-TYPEORM_SYNC=true
-TYPEORM_RUN_MIGRATIONS=false
+TYPEORM_RUN_MIGRATIONS=true
 ```
 
 | Variable | Qué poner |
@@ -116,12 +111,20 @@ npm install
 npm run start:dev
 ```
 
-Con `TYPEORM_SYNC=true`:
+Al arrancar:
 
-- TypeORM **crea las tablas** automáticamente en `back_base_nest`.
-- El **seed** inserta roles, permisos y el usuario admin.
+- Las **migraciones** crean las tablas en `back_base_nest` (o completan las que faltan si
+  la base ya tenía las de la versión anterior).
+- El **seed** inserta roles, permisos, el taller **Taller Demo** y el usuario admin (solo
+  si todavía no hay usuarios).
 
-En pgAdmin, refresca la base (**Refresh**): deberías ver tablas como `users`, `roles`, `permissions`, `refresh_tokens`, etc.
+En pgAdmin, refrescá la base (**Refresh**): deberías ver `talleres`, `users`, `clientes`,
+`vehiculos`, `catalogo_items`, `presupuestos`, `presupuesto_items`, `numeradores`, además de
+`roles`, `permissions`, `refresh_tokens` y `typeorm_migrations`.
+
+> Las tablas de negocio tienen **Row Level Security**: si las consultás desde pgAdmin con
+> el usuario `postgres` las vas a ver completas (el superusuario no queda limitado), pero
+> la API siempre filtra por el taller del usuario conectado.
 
 ### Usuario admin por defecto
 
@@ -175,7 +178,7 @@ Solo una instancia debe coincidir con `DB_PORT` en `.env`.
 | `ECONNREFUSED` | PostgreSQL no está corriendo | Iniciar servicio Windows: *Services* → `postgresql-x64-17` → Start |
 | `database "back_base_nest" does not exist` | Base no creada | Crear base en pgAdmin (paso 3) |
 | `connect ECONNREFUSED 5432` | Puerto equivocado | Revisar puerto en pgAdmin y en `DB_PORT` |
-| Tablas no aparecen | API no arrancó o sync desactivado | `TYPEORM_SYNC=true` y `npm run start:dev` |
+| Tablas no aparecen | API no arrancó o migraciones desactivadas | `TYPEORM_RUN_MIGRATIONS=true` y `npm run start:dev`, o `npm run migration:run` |
 
 ### Iniciar el servicio PostgreSQL en Windows
 
@@ -196,6 +199,5 @@ Cuando quieras usar Docker, ver [SETUP.md](./SETUP.md) sección Docker. Mientras
 1. pgAdmin → conectar **un** servidor (ej. PostgreSQL 17).  
 2. Crear base **`back_base_nest`**.  
 3. `.env` → `DB_*` con host, **puerto correcto**, usuario, **contraseña real** y nombre de base.  
-4. `TYPEORM_SYNC=true`  
-5. `npm run start:dev`  
-6. Refrescar tablas en pgAdmin y probar login admin.
+4. `npm install` y `npm run start:dev` (las migraciones crean todo).  
+5. Refrescar tablas en pgAdmin y probar login admin.

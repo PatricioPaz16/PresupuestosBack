@@ -3,11 +3,13 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 export class InitialSchema1747400000000 implements MigrationInterface {
   name = 'InitialSchema1747400000000';
 
+  // IF NOT EXISTS: una base creada antes con TYPEORM_SYNC=true ya tiene estas tablas;
+  // así puede pasar a usar migraciones sin errores.
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
 
     await queryRunner.query(`
-      CREATE TABLE "roles" (
+      CREATE TABLE IF NOT EXISTS "roles" (
         "id" SERIAL NOT NULL,
         "name" character varying NOT NULL,
         CONSTRAINT "UQ_roles_name" UNIQUE ("name"),
@@ -16,7 +18,7 @@ export class InitialSchema1747400000000 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "permissions" (
+      CREATE TABLE IF NOT EXISTS "permissions" (
         "id" SERIAL NOT NULL,
         "action" character varying NOT NULL,
         CONSTRAINT "UQ_permissions_action" UNIQUE ("action"),
@@ -25,7 +27,7 @@ export class InitialSchema1747400000000 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "role_permissions" (
+      CREATE TABLE IF NOT EXISTS "role_permissions" (
         "role_id" integer NOT NULL,
         "permission_id" integer NOT NULL,
         CONSTRAINT "PK_role_permissions" PRIMARY KEY ("role_id", "permission_id"),
@@ -35,7 +37,7 @@ export class InitialSchema1747400000000 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "users" (
+      CREATE TABLE IF NOT EXISTS "users" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
         "email" character varying NOT NULL,
         "password" character varying NOT NULL,
@@ -53,7 +55,7 @@ export class InitialSchema1747400000000 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "refresh_tokens" (
+      CREATE TABLE IF NOT EXISTS "refresh_tokens" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
         "token_hash" character varying NOT NULL,
         "user_id" uuid NOT NULL,
@@ -67,7 +69,7 @@ export class InitialSchema1747400000000 implements MigrationInterface {
     `);
 
     await queryRunner.query(
-      `CREATE INDEX "IDX_refresh_tokens_user_id" ON "refresh_tokens" ("user_id")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_refresh_tokens_user_id" ON "refresh_tokens" ("user_id")`,
     );
   }
 

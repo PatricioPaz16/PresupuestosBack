@@ -54,6 +54,16 @@ class EnvironmentVariables {
   @IsOptional()
   TYPEORM_SYNC?: string;
 
+  @IsOptional()
+  TYPEORM_RUN_MIGRATIONS?: string;
+
+  @IsOptional()
+  SEED_DEMO?: string;
+
+  @IsOptional()
+  @IsString()
+  BODY_LIMIT?: string;
+
   @IsString()
   @IsNotEmpty()
   JWT_SECRET: string;

@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -47,12 +48,19 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    // Se informa recién después de validar la contraseña para no revelar qué cuentas existen.
+    if (!user.isActive || !user.taller?.activo) {
+      throw new ForbiddenException(
+        'El usuario o el taller están desactivados. Consultá con el administrador.',
+      );
+    }
+
     await this.usersService.recordSuccessfulLogin(user.id);
     const refreshedUser = (await this.usersService.findById(user.id))!;
 
-    const accessToken = await this.signAccessToken(refreshedUser);
-    const refreshToken =
+    const { rawToken: refreshToken, sessionId } =
       await this.refreshTokenService.createForUser(refreshedUser);
+    const accessToken = await this.signAccessToken(refreshedUser, sessionId);
 
     return {
       accessToken,
@@ -62,10 +70,10 @@ export class AuthService {
   }
 
   async refreshSession(rawRefreshToken: string): Promise<AuthTokens> {
-    const { user, newRawToken } =
+    const { user, newRawToken, sessionId } =
       await this.refreshTokenService.validateAndRotate(rawRefreshToken);
 
-    const accessToken = await this.signAccessToken(user);
+    const accessToken = await this.signAccessToken(user, sessionId);
 
     return {
       accessToken,
@@ -82,11 +90,17 @@ export class AuthService {
     await this.refreshTokenService.revokeAllForUser(userId);
   }
 
-  signAccessToken(user: User): Promise<string> {
+  /**
+   * El JWT lleva el id de la sesión (refresh token) que lo emitió. JwtStrategy verifica en
+   * cada request que esa sesión siga vigente: logout, baja del usuario o cambio de
+   * contraseña cortan el acceso en el momento, sin esperar a que venza el JWT.
+   */
+  signAccessToken(user: User, sessionId: string): Promise<string> {
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
       role: user.role.name,
+      sid: sessionId,
     };
 
     return this.jwtService.signAsync(payload);

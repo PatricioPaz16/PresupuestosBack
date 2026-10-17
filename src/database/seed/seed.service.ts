@@ -2,12 +2,17 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
-import { Repository } from 'typeorm';
-import { PERMISSIONS, SEED_PERMISSIONS } from '../../common/constants/permissions.constant';
+import { DataSource, Repository } from 'typeorm';
+import {
+  PERMISSIONS,
+  SEED_PERMISSIONS,
+} from '../../common/constants/permissions.constant';
 import { RoleName } from '../../common/constants/roles.enum';
+import { TenantService } from '../../common/database/tenant.service';
 import { Permission } from '../../modules/permissions/entities/permission.entity';
 import { Role } from '../../modules/roles/entities/role.entity';
 import { User } from '../../modules/users/entities/user.entity';
+import { sembrarDatosDemo } from './demo-data';
 
 @Injectable()
 export class SeedService implements OnApplicationBootstrap {
@@ -21,12 +26,32 @@ export class SeedService implements OnApplicationBootstrap {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly configService: ConfigService,
+    private readonly dataSource: DataSource,
+    private readonly tenant: TenantService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
+    if (await this.dataSource.showMigrations()) {
+      this.logger.error(
+        'Hay migraciones pendientes. Ejecutá "npm run migration:run" o iniciá con TYPEORM_RUN_MIGRATIONS=true.',
+      );
+      return;
+    }
+
     await this.seedPermissions();
     await this.seedRoles();
-    await this.seedAdminUser();
+    const tallerId = await this.ensureDefaultTaller();
+    await this.seedAdminUser(tallerId);
+
+    if (this.configService.get<boolean>('seed.demo')) {
+      const sembrado = await this.tenant.run(tallerId, (em) =>
+        sembrarDatosDemo(em),
+      );
+      if (sembrado) {
+        this.logger.log('Datos de ejemplo cargados en el taller inicial');
+      }
+    }
+
     this.logger.log('Database seed completed');
   }
 
@@ -89,17 +114,35 @@ export class SeedService implements OnApplicationBootstrap {
     }
   }
 
-  private async seedAdminUser(): Promise<void> {
-    const adminEmail =
-      this.configService.get<string>('seed.adminEmail') ?? 'admin@example.com';
+  /** Base vacía: crea un taller inicial para el administrador del seed. */
+  private async ensureDefaultTaller(): Promise<string> {
+    const [existente] = await this.dataSource.query<Array<{ id: string }>>(
+      `SELECT id FROM talleres ORDER BY created_at LIMIT 1`,
+    );
+    if (existente) {
+      return existente.id;
+    }
+
+    const [creado] = await this.dataSource.query<Array<{ id: string }>>(
+      `INSERT INTO talleres (nombre, direccion, localidad, telefono, email)
+       VALUES ('Taller Demo', 'Av. San Martín 1450', 'Córdoba', '351 555-0142', 'contacto@tallerdemo.com.ar')
+       RETURNING id`,
+    );
+    this.logger.log('Taller inicial creado: Taller Demo');
+    return creado.id;
+  }
+
+  private async seedAdminUser(tallerId: string): Promise<void> {
+    const adminEmail = (
+      this.configService.get<string>('seed.adminEmail') ?? 'admin@example.com'
+    ).toLowerCase();
     const adminPassword =
       this.configService.get<string>('seed.adminPassword') ?? 'Admin123!';
 
-    const existingAdmin = await this.userRepository.findOne({
-      where: { email: adminEmail },
-    });
-
-    if (existingAdmin) {
+    // Solo con la tabla de usuarios vacía (primer arranque). Si se creara cada vez que
+    // falta ese email, al renombrar o borrar al admin reaparecería un usuario con la
+    // contraseña por defecto del .env.
+    if ((await this.userRepository.count()) > 0) {
       return;
     }
 
@@ -117,8 +160,9 @@ export class SeedService implements OnApplicationBootstrap {
     await this.userRepository.save({
       email: adminEmail,
       password: passwordHash,
-      fullName: 'System Administrator',
+      fullName: 'Administrador del taller',
       role: adminRole,
+      tallerId,
     });
 
     this.logger.log(`Default admin user created: ${adminEmail}`);

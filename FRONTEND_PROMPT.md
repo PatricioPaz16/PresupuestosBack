@@ -1,5 +1,12 @@
 # Prompt para IA de Frontend (Angular)
 
+> **Nota:** este prompt es el que se usó para generar la base del front. El frontend ya
+> existe (`PresupuestosFront`) y consume además los endpoints de talleres, clientes,
+> vehículos, catálogo y presupuestos. El contrato de autenticación de abajo sigue vigente;
+> para el resto, ver [README.md](./README.md), [docs/ARQUITECTURA.md](./docs/ARQUITECTURA.md)
+> y Swagger (`/api/docs`). `UserResponseDto` ahora incluye `taller`, `isActive` y
+> `lastLoginAt`, y las rutas privadas del front empiezan en `/presupuestos`.
+
 Copia el contenido del bloque siguiente y envíaselo a tu IA de frontend para generar el cliente alineado con este backend (`BackBaseNest`).
 
 ---

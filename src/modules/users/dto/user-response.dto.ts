@@ -8,6 +8,14 @@ export class RoleResponseDto {
   name: string;
 }
 
+export class TallerResumenDto {
+  @Expose()
+  id: string;
+
+  @Expose()
+  nombre: string;
+}
+
 export class UserResponseDto {
   @Expose()
   id: string;
@@ -21,4 +29,14 @@ export class UserResponseDto {
   @Expose()
   @Type(() => RoleResponseDto)
   role: RoleResponseDto;
+
+  @Expose()
+  @Type(() => TallerResumenDto)
+  taller: TallerResumenDto;
+
+  @Expose()
+  isActive: boolean;
+
+  @Expose()
+  lastLoginAt: Date | null;
 }

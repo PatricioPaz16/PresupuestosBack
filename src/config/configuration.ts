@@ -8,8 +8,9 @@ export default () => ({
     username: process.env.DB_USERNAME ?? 'postgres',
     password: process.env.DB_PASSWORD ?? 'postgres',
     name: process.env.DB_NAME ?? 'back_base_nest',
-    synchronize: process.env.TYPEORM_SYNC === 'true',
-    runMigrations: process.env.TYPEORM_RUN_MIGRATIONS === 'true',
+    // Las migraciones corren al iniciar salvo TYPEORM_RUN_MIGRATIONS=false.
+    // TYPEORM_SYNC ya no se usa (ver DatabaseModule).
+    runMigrations: process.env.TYPEORM_RUN_MIGRATIONS !== 'false',
   },
   jwt: {
     secret: process.env.JWT_SECRET ?? 'change-me-in-production',
@@ -44,5 +45,8 @@ export default () => ({
   seed: {
     adminEmail: process.env.SEED_ADMIN_EMAIL ?? 'admin@example.com',
     adminPassword: process.env.SEED_ADMIN_PASSWORD ?? 'Admin123!',
+    // Catálogo y datos de ejemplo en el taller inicial (solo si está vacío).
+    demo: process.env.SEED_DEMO === 'true',
   },
+  bodyLimit: process.env.BODY_LIMIT ?? '1mb',
 });

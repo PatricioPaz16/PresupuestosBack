@@ -1,11 +1,14 @@
 import { config } from 'dotenv';
 import { DataSource } from 'typeorm';
+import { configurarTiposPg } from '../common/database/pg-types';
 import { Permission } from '../modules/permissions/entities/permission.entity';
 import { Role } from '../modules/roles/entities/role.entity';
 import { RefreshToken } from '../modules/auth/entities/refresh-token.entity';
+import { Taller } from '../modules/talleres/entities/taller.entity';
 import { User } from '../modules/users/entities/user.entity';
 
 config();
+configurarTiposPg();
 
 export default new DataSource({
   type: 'postgres',
@@ -14,7 +17,7 @@ export default new DataSource({
   username: process.env.DB_USERNAME ?? 'postgres',
   password: process.env.DB_PASSWORD ?? 'postgres',
   database: process.env.DB_NAME ?? 'back_base_nest',
-  entities: [User, Role, Permission, RefreshToken],
+  entities: [User, Role, Permission, RefreshToken, Taller],
   migrations: ['src/database/migrations/*.ts'],
   migrationsTableName: 'typeorm_migrations',
 });

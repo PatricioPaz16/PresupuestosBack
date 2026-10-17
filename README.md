@@ -1,192 +1,123 @@
-# BackBaseNest
+# Presupuestos de Taller — API
 
-API base en **NestJS 11** con autenticación por cookies HttpOnly, refresh tokens con rotación, RBAC, PostgreSQL, migraciones TypeORM, rate limiting, health checks, logging estructurado (Pino) y Swagger.
+API en **NestJS 11 + PostgreSQL** para armar, imprimir y enviar presupuestos de talleres
+mecánicos. Pensada para el caso real del taller: muchos repuestos no están en stock y se
+cotizan en la repuestera en el momento, así que cada ítem se puede cargar desde el catálogo
+o escribir libre, con su costo y precio propios.
+
+Varios talleres comparten la misma instalación. Cada usuario pertenece a un taller y la
+base de datos impide ver o tocar datos de otro (Row Level Security + claves foráneas
+compuestas).
+
+- Frontend: carpeta `PresupuestosFront` (Angular 21).
+- Arquitectura, modelo de datos y decisiones: [docs/ARQUITECTURA.md](./docs/ARQUITECTURA.md).
+- Script SQL completo (para leer o crear la base a mano): [docs/esquema-completo.sql](./docs/esquema-completo.sql).
+- Guías de instalación: [SETUP.md](./SETUP.md) · [SETUP-POSTGRES-LOCAL.md](./SETUP-POSTGRES-LOCAL.md).
 
 ---
 
-## Guía de arranque
+## Arranque rápido
 
-**Setup paso a paso:** [SETUP.md](./SETUP.md) · **PostgreSQL local (pgAdmin, sin Docker):** [SETUP-POSTGRES-LOCAL.md](./SETUP-POSTGRES-LOCAL.md)
-
-Resumen rápido:
-
-### 1. Requisitos previos
-
-| Herramienta      | Versión recomendada |
-|------------------|---------------------|
-| Node.js          | 20 LTS o superior   |
-| npm              | 10+                 |
-| Docker Desktop   | Para PostgreSQL     |
-
-### 2. Clonar e instalar dependencias
+Requisitos: Node.js 20 LTS o superior y PostgreSQL 14 o superior (probado en 16).
 
 ```bash
-cd BackBaseNest
 npm install
-```
-
-### 3. Variables de entorno
-
-```bash
-cp .env.example .env
-```
-
-Revisa al menos:
-
-- `JWT_SECRET` — cadena larga y aleatoria (mín. 32 caracteres en producción).
-- `FRONTEND_URL` — debe coincidir **exactamente** con el origen de tu SPA (ej. `http://localhost:4200`).
-- Credenciales de PostgreSQL (`DB_*`).
-
-### 4. Levantar PostgreSQL
-
-Abre **Docker Desktop** y ejecuta:
-
-```bash
-docker compose up -d
-```
-
-Comprueba que el contenedor está sano:
-
-```bash
-docker compose ps
-```
-
-Deberías ver `back-base-nest-db` en estado `healthy`.
-
-### 5. Crear el esquema de base de datos
-
-Tienes **dos opciones** (elige una):
-
-#### Opción A — Desarrollo rápido (`TYPEORM_SYNC=true`)
-
-En `.env`:
-
-```env
-TYPEORM_SYNC=true
-TYPEORM_RUN_MIGRATIONS=false
-```
-
-TypeORM crea/actualiza las tablas al arrancar la API. Ideal para empezar en local.
-
-#### Opción B — Migraciones (recomendado para staging/producción)
-
-En `.env`:
-
-```env
-TYPEORM_SYNC=false
-TYPEORM_RUN_MIGRATIONS=false
-```
-
-Ejecuta las migraciones manualmente:
-
-```bash
-npm run migration:run
-```
-
-O arranca con migraciones automáticas:
-
-```env
-TYPEORM_RUN_MIGRATIONS=true
-```
-
-### 6. Arrancar la API
-
-```bash
+cp .env.example .env        # completar DB_PASSWORD y JWT_SECRET
 npm run start:dev
 ```
 
-La API queda en `http://localhost:3000`.
+Al arrancar, la API:
 
-### 7. Seed automático
+1. Aplica las migraciones pendientes (`TYPEORM_RUN_MIGRATIONS=true`, el valor por defecto).
+2. Si la base está vacía, crea el taller **Taller Demo** y su administrador
+   (`SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`, por defecto `admin@example.com` / `Admin123!`).
+3. Con `SEED_DEMO=true`, carga además un catálogo de ejemplo, dos clientes y tres vehículos.
 
-Al iniciar, si la base está vacía, el **SeedModule** crea:
+API en `http://localhost:3000/api` · Swagger en `http://localhost:3000/api/docs`.
 
-| Recurso      | Detalle |
-|--------------|---------|
-| Roles        | `ADMIN`, `USER` |
-| Permisos     | `users:read`, `users:manage`, `auth:me` |
-| Usuario admin| Ver `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` en `.env` |
-
-Por defecto:
-
-- **Email:** `admin@example.com`
-- **Password:** `Admin123!`
-
-### 8. Verificar que todo funciona
-
-```bash
-# Liveness
-curl http://localhost:3000/api/health
-
-# Readiness (PostgreSQL)
-curl http://localhost:3000/api/health/ready
-
-# Login (guarda cookies en archivo)
-curl -X POST http://localhost:3000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d "{\"email\":\"admin@example.com\",\"password\":\"Admin123!\"}" \
-  -c cookies.txt -v
-
-# Perfil (usa cookies)
-curl http://localhost:3000/api/auth/me -b cookies.txt
-```
-
-Swagger UI: [http://localhost:3000/api/docs](http://localhost:3000/api/docs)
-
-### 9. Tests e2e (requiere PostgreSQL + seed)
-
-```bash
-npm run test:e2e
-```
+> **Si venías usando la base anterior** (creada con `TYPEORM_SYNC=true`): no hace falta
+> borrar nada. La migración inicial detecta las tablas existentes y la nueva agrega talleres
+> y presupuestos. Los usuarios que ya existían quedan en un taller llamado
+> **Taller principal** (el nombre se cambia desde *Configuración*). `TYPEORM_SYNC` ya no
+> se usa: si quedó en tu `.env`, se ignora.
 
 ---
 
-## Endpoints principales
+## Talleres y usuarios
 
-| Método | Ruta                 | Acceso   | Descripción |
-|--------|----------------------|----------|-------------|
-| POST   | `/api/auth/login`    | Público  | Login; cookies `access_token` + `refresh_token` |
-| POST   | `/api/auth/refresh`  | Público* | Rota refresh token (cookie en path `/api/auth`) |
-| POST   | `/api/auth/logout`   | JWT      | Revoca refresh y borra cookies |
-| GET    | `/api/auth/me`       | JWT      | Perfil actual |
-| GET    | `/api/users`         | ADMIN    | Lista usuarios |
-| GET    | `/api/health`        | Público  | Liveness |
-| GET    | `/api/health/ready`  | Público  | Readiness + DB |
+| Qué | Cómo |
+|-----|------|
+| Crear un taller nuevo con su administrador | `npm run taller:crear -- --nombre "Taller Norte" --email admin@tallernorte.com --password "Clave123!" --admin "Laura Gómez"` |
+| Agregar usuarios a un taller | Desde la app, *Usuarios* (solo administradores del taller) o `POST /api/users` |
+| Datos del taller (encabezado del presupuesto, logo, IVA, validez, recargo) | Desde la app, *Configuración* (`PATCH /api/taller`) |
 
-\* Requiere cookie `refresh_token` válida.
+Roles dentro de cada taller:
+
+- **ADMIN**: todo lo del operador + usuarios, configuración del taller y ajuste masivo de precios.
+- **USER** (operador): presupuestos, clientes, vehículos y catálogo.
+
+Un usuario desactivado o un taller desactivado pierden el acceso en el acto (no esperan a
+que venza el token de 15 minutos).
 
 ---
 
-## Cookies de sesión
+## Endpoints
 
-| Cookie           | Path        | Duración típica | Uso |
-|------------------|-------------|-----------------|-----|
-| `access_token`   | `/`         | 15 min          | JWT de acceso |
-| `refresh_token`  | `/api/auth` | 7 días          | Rotación de sesión |
+Todas las rutas llevan el prefijo `/api` y usan la cookie de sesión (salvo las públicas).
+El detalle de cada body/respuesta está en Swagger.
 
-El JWT **nunca** se devuelve en el body JSON.
+| Método | Ruta | Acceso | Para qué |
+|--------|------|--------|----------|
+| POST | `/auth/login` | Público | Inicia sesión (cookies `access_token` + `refresh_token`) |
+| POST | `/auth/refresh` | Público* | Renueva la sesión (rota el refresh token) |
+| POST | `/auth/logout` | Sesión | Cierra la sesión (la revoca en el servidor) |
+| GET | `/auth/me` | Sesión | Usuario actual, con su taller |
+| GET | `/taller` | Sesión | Datos y valores por defecto del taller |
+| PATCH | `/taller` | ADMIN | Edita datos del taller, logo, próximo número |
+| GET | `/presupuestos` | Sesión | Listado con búsqueda (`q`), `estado`, paginado |
+| GET | `/presupuestos/:id` | Sesión | Detalle completo (incluye datos internos) |
+| GET | `/presupuestos/:id/documento` | Sesión | Versión para imprimir/enviar: **sin** costos, proveedor ni notas internas |
+| POST | `/presupuestos` | Sesión | Crea (el número y los totales los pone la base) |
+| PUT | `/presupuestos/:id` | Sesión | Reemplaza cabecera e ítems (requiere `version`) |
+| PATCH | `/presupuestos/:id/estado` | Sesión | Cambia el estado (borrador / enviado / aprobado / rechazado) |
+| POST | `/presupuestos/:id/duplicar` | Sesión | Copia como borrador nuevo |
+| DELETE | `/presupuestos/:id` | Sesión | Elimina (solo borradores) |
+| GET | `/vehiculos/buscar?patente=` | Sesión | Busca por patente (exacta y parecidas) con cliente e historial |
+| GET / POST / PATCH | `/vehiculos`, `/vehiculos/:id` | Sesión | Alta rápida (con cliente nuevo o existente) y edición |
+| GET / POST / PATCH | `/clientes`, `/clientes/:id` | Sesión | Búsqueda por nombre o teléfono, alta y edición |
+| GET / POST / PATCH | `/catalogo`, `/catalogo/:id` | Sesión | Repuestos y trabajos frecuentes |
+| POST | `/catalogo/ajuste-precios` | ADMIN | Aumento masivo por porcentaje, con redondeo |
+| GET / POST / PATCH | `/users`, `/users/:id` | ADMIN | Usuarios del propio taller |
+| GET | `/health`, `/health/ready` | Público | Liveness / readiness (con ping a la base) |
 
-### Frontend (Angular / fetch)
+\* Requiere la cookie `refresh_token`.
 
-```typescript
-fetch('http://localhost:3000/api/auth/login', {
-  method: 'POST',
-  credentials: 'include',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email, password }),
-});
+Los importes viajan como **texto con punto decimal** (`"12345.67"`), nunca como número de
+coma flotante. Errores de base de datos frecuentes (patente repetida, presupuesto editado
+por otra persona, etc.) vuelven como 400/409 con un mensaje en castellano.
+
+---
+
+## Base de datos
+
+- Esquema creado **solo por migraciones** (`src/database/migrations`). El DDL de talleres y
+  presupuestos está en [`src/database/sql/1792200000000-talleres-presupuestos.sql`](./src/database/sql/1792200000000-talleres-presupuestos.sql).
+- Subtotales, descuento, IVA y total los calcula **PostgreSQL** (columna generada +
+  triggers). La API no acepta totales que vengan del navegador.
+- Numeración correlativa propia de cada taller (`00001`, `00002`, …), sin huecos por
+  concurrencia.
+- Aislamiento por taller con Row Level Security: cada operación de negocio corre en una
+  transacción con `SET LOCAL ROLE presupuestos_app` y `app.taller_id`.
+
+La migración crea el rol `presupuestos_app` y se lo asigna al usuario que la ejecuta. Si la
+API se conecta con **otro** usuario de PostgreSQL, hay que darle permiso una vez:
+
+```sql
+GRANT presupuestos_app TO usuario_api;                -- PostgreSQL 14 / 15
+GRANT presupuestos_app TO usuario_api WITH SET TRUE;  -- PostgreSQL 16 o superior
 ```
 
----
-
-## Seguridad incorporada
-
-- Rate limit en login (`THROTTLE_LOGIN_LIMIT` / `THROTTLE_LOGIN_TTL_MS`)
-- Bloqueo tras `MAX_LOGIN_ATTEMPTS` fallidos (`LOCKOUT_MINUTES`)
-- Política de contraseña fuerte en `LoginDto`
-- Refresh tokens hasheados (SHA-256) en BD con rotación
-- `helmet`, CORS estricto, `ValidationPipe` con whitelist
-- Logging JSON con `x-request-id` por petición
+Al arrancar, la API comprueba que puede asumir ese rol y, si no, lo avisa en el log.
 
 ---
 
@@ -194,55 +125,79 @@ fetch('http://localhost:3000/api/auth/login', {
 
 | Script | Descripción |
 |--------|-------------|
-| `npm run start:dev` | Desarrollo con hot-reload |
-| `npm run build` | Compilar |
-| `npm run start:prod` | Producción |
-| `npm run migration:run` | Aplicar migraciones |
-| `npm run migration:revert` | Revertir última migración |
-| `npm run migration:show` | Estado de migraciones |
-| `npm run test:e2e` | Tests end-to-end |
+| `npm run start:dev` | Desarrollo con recarga |
+| `npm run build` / `npm run start:prod` | Compilar / ejecutar compilado |
+| `npm run migration:run` | Aplicar migraciones a mano |
+| `npm run migration:show` / `migration:revert` | Estado / revertir la última |
+| `npm run taller:crear -- --nombre … --email … --password …` | Alta de taller con su administrador |
+| `npm run lint` | ESLint (con corrección) |
+| `npm test` | Tests unitarios (normalización de patentes y teléfonos) |
+| `npm run test:e2e` | Tests contra PostgreSQL real (usá una base aparte: `DB_NAME=presupuestos_test`) |
+
+---
+
+## Seguridad incorporada
+
+- Sesión en cookies HttpOnly; el JWT nunca viaja en el body. Cada token de acceso está
+  atado a su sesión: logout, cambio de contraseña o desactivar al usuario cortan el acceso
+  al instante.
+- Refresh tokens hasheados (SHA-256) con rotación.
+- Rate limit y bloqueo por intentos fallidos en el login (`THROTTLE_LOGIN_*`, `MAX_LOGIN_ATTEMPTS`, `LOCKOUT_MINUTES`).
+- Aislamiento entre talleres en la propia base (RLS forzado + claves foráneas compuestas).
+- Control de concurrencia optimista en presupuestos: si dos personas editan el mismo, la
+  segunda recibe un 409 en lugar de pisar los cambios.
+- `helmet`, CORS estricto, `ValidationPipe` con whitelist, logs JSON con `x-request-id`.
 
 ---
 
 ## Producción (checklist)
 
-1. `NODE_ENV=production`
-2. `TYPEORM_SYNC=false` — solo migraciones
-3. `COOKIE_SECURE=true` + HTTPS
-4. `JWT_SECRET` robusto y único
-5. Cambiar credenciales del admin seed o desactivar seed
-6. `docker compose` o RDS/Cloud SQL para PostgreSQL
+1. `NODE_ENV=production`, `COOKIE_SECURE=true` y HTTPS.
+2. `JWT_SECRET` largo, aleatorio y único.
+3. `FRONTEND_URL` igual al dominio real del front.
+4. Usuario de PostgreSQL **sin** superusuario para la API (ver permiso del rol arriba).
+5. Cambiar la contraseña del administrador inicial al primer ingreso; `SEED_DEMO=false`.
+6. Backups automáticos de la base.
 
 ---
 
-## Solución de problemas
+## Problemas frecuentes
 
 | Problema | Causa probable | Solución |
 |----------|----------------|----------|
-| `ECONNREFUSED` al arrancar | PostgreSQL no corre | `docker compose up -d` |
-| Cookies no se envían | CORS / `withCredentials` | Igualar `FRONTEND_URL` al origen del front |
-| Cookie `secure` ignorada en local | `COOKIE_SECURE=true` sin HTTPS | `COOKIE_SECURE=false` en dev |
-| Login 429 | Rate limit | Esperar 1 min o subir `THROTTLE_LOGIN_LIMIT` |
-| Login 403 bloqueo | Muchos intentos fallidos | Esperar `LOCKOUT_MINUTES` o resetear `locked_until` en BD |
-| Tablas no existen | Sin sync ni migraciones | `TYPEORM_SYNC=true` o `npm run migration:run` |
+| `ECONNREFUSED` al arrancar | PostgreSQL no corre | Iniciar el servicio o `docker compose up -d` |
+| `Hay migraciones pendientes` en el log | Se arrancó con `TYPEORM_RUN_MIGRATIONS=false` | `npm run migration:run` |
+| `La API no puede asumir el rol "presupuestos_app"` | La API usa un usuario distinto del que corrió las migraciones | `GRANT presupuestos_app TO <usuario>` (ver arriba) |
+| `permission denied to create role` al migrar | El usuario de la migración no tiene `CREATEROLE` | Correr una vez como `postgres`: `CREATE ROLE presupuestos_app NOLOGIN;` y el `GRANT`, y volver a migrar |
+| `extension "unaccent" is not available` | PostgreSQL sin los módulos *contrib* | En Linux: instalar `postgresql-contrib`; el instalador de Windows ya los trae |
+| Cookies no se envían | CORS / origen distinto | Igualar `FRONTEND_URL` al origen del front |
+| Login 429 | Rate limit | Esperar 1 minuto o subir `THROTTLE_LOGIN_LIMIT` en desarrollo |
+| 409 "Otra persona guardó este presupuesto…" | Dos pestañas o usuarios editando lo mismo | Recargar el presupuesto y repetir el cambio |
 
 ---
 
-## Prompt para el frontend Angular
-
-El contrato API + reglas de integración (cookies, interceptors, modelos, guards) están en **[FRONTEND_PROMPT.md](./FRONTEND_PROMPT.md)** para copiarlo a tu IA o equipo de frontend.
-
----
-
-## Estructura del proyecto
+## Estructura
 
 ```
 src/
-├── common/           # Guards, decorators, validators
-├── config/           # Env, Swagger
-├── database/         # TypeORM, migraciones, seed
-└── modules/
-    ├── auth/         # Login, refresh, logout, JWT
-    ├── health/       # Probes
-    └── users/        # Gestión de usuarios
+├── common/
+│   ├── database/        # TenantService (rol + taller por transacción), tipos de pg
+│   ├── filters/         # Errores de PostgreSQL -> respuestas HTTP en castellano
+│   ├── normalizers/     # Patentes argentinas y teléfonos (E.164) + tests
+│   └── …                # Guards, decorators (@TallerId, @Roles, @Public)
+├── config/              # Variables de entorno, Swagger
+├── database/
+│   ├── migrations/      # InitialSchema + TalleresPresupuestos
+│   ├── sql/             # DDL completo de talleres y presupuestos
+│   └── seed/            # Roles, taller inicial, admin, datos de ejemplo
+├── modules/
+│   ├── auth/            # Login, refresh, logout, sesión
+│   ├── users/           # Usuarios del taller
+│   ├── talleres/        # Configuración del taller
+│   ├── clientes/
+│   ├── vehiculos/       # Búsqueda por patente y alta rápida
+│   ├── catalogo/        # Repuestos y trabajos frecuentes
+│   ├── presupuestos/    # Alta, edición, estados, documento imprimible
+│   └── health/
+└── scripts/crear-taller.ts
 ```

@@ -1,283 +1,191 @@
-# Guía de setup — BackBaseNest (Backend)
+# Guía de instalación — Presupuestos de Taller (API)
 
-Documentación paso a paso para levantar el proyecto desde cero en tu máquina local.
+Paso a paso para levantar el backend en una máquina de desarrollo.
 
 ---
 
 ## 1. Requisitos previos
 
-Instala y verifica lo siguiente antes de continuar:
-
 | Herramienta | Versión recomendada | Comprobar |
 |-------------|---------------------|-----------|
 | **Node.js** | 20 LTS o superior | `node -v` |
 | **npm** | 10+ | `npm -v` |
-| **PostgreSQL** | 15+ (local) | Instalado en Windows + pgAdmin |
-| **Git** | Cualquier reciente | `git -v` |
-| **Docker Desktop** | Opcional | Solo si usas contenedor (ver sección 5B) |
+| **PostgreSQL** | 14 o superior (probado en 16) | pgAdmin o `psql --version` |
+| **Docker Desktop** | Opcional | Solo si preferís la base en un contenedor (sección 5B) |
 
-> **Desarrollo local sin Docker:** sigue **[SETUP-POSTGRES-LOCAL.md](./SETUP-POSTGRES-LOCAL.md)** (pgAdmin, crear base, `.env`).
+> **PostgreSQL instalado en Windows (sin Docker):** seguí
+> **[SETUP-POSTGRES-LOCAL.md](./SETUP-POSTGRES-LOCAL.md)** (pgAdmin, crear la base, `.env`).
 
----
-
-## 2. Obtener el código
-
-```bash
-git clone <URL_DEL_REPOSITORIO>
-cd BackBaseNest
-```
-
-Si ya tienes la carpeta del proyecto:
-
-```bash
-cd ruta/a/BackBaseNest
-```
+La base usa las extensiones `pg_trgm` y `unaccent` (búsquedas sin acentos). Vienen con el
+instalador de PostgreSQL para Windows y con la imagen de Docker; en Linux están en el
+paquete `postgresql-contrib`.
 
 ---
 
-## 3. Instalar dependencias
+## 2. Instalar dependencias
+
+Desde la carpeta `PresupuestosBack`:
 
 ```bash
 npm install
 ```
 
-Espera a que termine sin errores. Si aparecen avisos `EBADENGINE` por la versión de Node, usa Node 20 o 22 LTS.
+Hace falta correrlo aunque ya lo hayas hecho antes: se agregaron dependencias.
 
 ---
 
-## 4. Configurar variables de entorno
-
-### 4.1 Crear el archivo `.env`
+## 3. Variables de entorno
 
 ```bash
 cp .env.example .env
 ```
 
-### 4.2 Variables mínimas a revisar
-
-Abre `.env` y confirma o ajusta:
+Mínimo a revisar en `.env`:
 
 ```env
-# Servidor
-NODE_ENV=development
-PORT=3000
 FRONTEND_URL=http://localhost:4200
 
-# PostgreSQL local (pgAdmin) — ver SETUP-POSTGRES-LOCAL.md
 DB_HOST=localhost
 DB_PORT=5432
 DB_USERNAME=postgres
 DB_PASSWORD=TU_CONTRASEÑA_DE_POSTGRES
 DB_NAME=back_base_nest
 
-# Esquema de BD — ver sección 6
-TYPEORM_SYNC=true
-TYPEORM_RUN_MIGRATIONS=false
+TYPEORM_RUN_MIGRATIONS=true
 
-# Seguridad (cambiar en producción)
-JWT_SECRET=dev-only-change-before-production-min-32
-
-# Cookies en desarrollo (HTTP)
+JWT_SECRET=una-cadena-larga-y-aleatoria-de-al-menos-32-caracteres
 COOKIE_SECURE=false
-COOKIE_SAME_SITE=strict
 
-# Usuario admin del seed
 SEED_ADMIN_EMAIL=admin@example.com
 SEED_ADMIN_PASSWORD=Admin123!
+SEED_DEMO=true          # opcional: catálogo y clientes de ejemplo para probar
 ```
 
 | Variable | Descripción |
 |----------|-------------|
-| `FRONTEND_URL` | Origen exacto del SPA (CORS). Debe coincidir con la URL del Angular. |
-| `JWT_SECRET` | Clave para firmar JWT. En producción: cadena larga y aleatoria. |
-| `TYPEORM_SYNC` | `true` = crea tablas al arrancar (solo desarrollo). |
-| `TYPEORM_RUN_MIGRATIONS` | `true` = ejecuta migraciones al arrancar. |
+| `FRONTEND_URL` | Origen exacto del front (CORS). |
+| `TYPEORM_RUN_MIGRATIONS` | `true` (por defecto): la API aplica las migraciones al arrancar. `false`: las corrés vos con `npm run migration:run`. |
+| `SEED_ADMIN_*` | Administrador que se crea **solo** si la tabla de usuarios está vacía. |
+| `SEED_DEMO` | `true`: carga datos de ejemplo en el primer taller si todavía no tiene catálogo. |
+| `BODY_LIMIT` | Tamaño máximo del JSON (por defecto `1mb`; alcanza para el logo). |
+
+`TYPEORM_SYNC` ya no existe: el esquema tiene triggers, columnas generadas y políticas de
+seguridad que el sincronizado automático de TypeORM no sabe crear. Si quedó en tu `.env`,
+se ignora.
 
 ---
 
-## 5. Base de datos PostgreSQL
+## 4. Base de datos
 
-### Opción A — PostgreSQL local + pgAdmin (recomendado en tu PC)
+### Opción A — PostgreSQL local + pgAdmin
 
-**Guía completa:** [SETUP-POSTGRES-LOCAL.md](./SETUP-POSTGRES-LOCAL.md)
+Guía completa: [SETUP-POSTGRES-LOCAL.md](./SETUP-POSTGRES-LOCAL.md). En resumen: crear una
+base vacía (por ejemplo `back_base_nest`) y poner su nombre, puerto y contraseña en `.env`.
 
-Resumen:
-
-1. En pgAdmin, conectar un servidor (ej. **PostgreSQL 17**; clic derecho → **Connect Server**).
-2. Crear base de datos: nombre **`back_base_nest`**, owner **`postgres`**.
-3. En `.env`: `DB_PASSWORD` = la misma contraseña con la que entras a pgAdmin; `DB_PORT` = puerto del servidor (Properties → Connection).
-4. `TYPEORM_SYNC=true` → `npm run start:dev` crea tablas y seed.
-
-No necesitas Docker para esto.
-
-### Opción B — Docker (opcional, para más adelante)
-
-#### 5B.1 Iniciar Docker Desktop
-
-Docker Desktop debe estar **abierto y en ejecución**.
-
-#### 5B.2 Arrancar el contenedor
+### Opción B — Docker
 
 ```bash
 docker compose up -d
+docker compose ps        # back-base-nest-db debe figurar "healthy"
 ```
 
-#### 5B.3 Verificar
-
-```bash
-docker compose ps
-```
-
-En `.env` con Docker suele valer:
-
-```env
-DB_HOST=localhost
-DB_PORT=5432
-DB_USERNAME=postgres
-DB_PASSWORD=postgres
-DB_NAME=back_base_nest
-```
-
-#### 5B.4 Detener / reset
-
-```bash
-docker compose down
-docker compose down -v   # borra datos
-```
+Con Docker, en `.env`: `DB_PASSWORD=postgres`.
 
 ---
 
-## 6. Crear el esquema de base de datos
-
-Elige **una** de las dos opciones.
-
-### Opción A — Desarrollo rápido (recomendada para empezar)
-
-En `.env`:
-
-```env
-TYPEORM_SYNC=true
-TYPEORM_RUN_MIGRATIONS=false
-```
-
-TypeORM crea o actualiza las tablas automáticamente al arrancar la API. No necesitas ejecutar migraciones manualmente.
-
-### Opción B — Migraciones (recomendada para staging/producción)
-
-En `.env`:
-
-```env
-TYPEORM_SYNC=false
-TYPEORM_RUN_MIGRATIONS=false
-```
-
-Ejecutar migraciones manualmente:
-
-```bash
-npm run migration:run
-```
-
-Ver estado de migraciones:
-
-```bash
-npm run migration:show
-```
-
-Revertir la última migración (solo si es necesario):
-
-```bash
-npm run migration:revert
-```
-
-**Alternativa:** ejecutar migraciones al arrancar la API:
-
-```env
-TYPEORM_RUN_MIGRATIONS=true
-```
-
-> Requiere haber compilado antes (`npm run build`) porque las migraciones se leen desde `dist/`.
-
----
-
-## 7. Arrancar la API
-
-### 7.1 Modo desarrollo (hot-reload)
+## 5. Arrancar la API
 
 ```bash
 npm run start:dev
 ```
 
-La API queda disponible en:
+En el primer arranque, el log muestra (entre otras) estas líneas:
 
-**http://localhost:3000**
+```
+Migration InitialSchema1747400000000 has been executed successfully.
+Migration TalleresPresupuestos1792200000000 has been executed successfully.
+Taller inicial creado: Taller Demo
+Default admin user created: admin@example.com
+Database seed completed
+```
 
-Prefijo global de rutas: `/api`
+Y un aviso si la API se conecta como superusuario (`postgres`): en desarrollo está bien;
+el aislamiento entre talleres funciona igual.
 
-### 7.2 Modo producción local (opcional)
+API: `http://localhost:3000/api` · Swagger: `http://localhost:3000/api/docs`.
+
+### Si ya tenías la base de la versión anterior
+
+No hace falta borrarla. La migración inicial reconoce las tablas creadas con el
+sincronizado de TypeORM y la segunda agrega talleres y presupuestos. Los usuarios
+existentes pasan a un taller llamado **Taller principal**.
+
+### Migraciones a mano (opcional)
 
 ```bash
+npm run migration:run      # aplica pendientes
+npm run migration:show     # estado
+npm run migration:revert   # revierte la última
+```
+
+---
+
+## 6. Crear talleres
+
+El primer taller lo crea el seed. Para sumar otros:
+
+```bash
+npm run taller:crear -- --nombre "Taller Norte" --email admin@tallernorte.com --password "Clave123!" --admin "Laura Gómez"
+```
+
+Si en PowerShell npm no recibe los parámetros, ejecutá el script compilado directamente:
+
+```powershell
 npm run build
-npm run start:prod
+node dist/scripts/crear-taller.js --nombre "Taller Norte" --email admin@tallernorte.com --password "Clave123!" --admin "Laura Gómez"
+```
+
+La contraseña tiene que cumplir la política del login (mayúscula, minúscula, número y
+símbolo, 8+ caracteres). Después, ese administrador da de alta a su gente desde
+*Usuarios* en la app.
+
+---
+
+## 7. Usuario de PostgreSQL de la API (producción)
+
+La migración crea el rol sin login `presupuestos_app`, que es el que queda sujeto a las
+políticas de Row Level Security, y se lo asigna al usuario que corre la migración. Si la
+API usa otro usuario:
+
+```sql
+GRANT presupuestos_app TO usuario_api;                -- PostgreSQL 14 / 15
+GRANT presupuestos_app TO usuario_api WITH SET TRUE;  -- PostgreSQL 16 o superior
+```
+
+Si el usuario que migra no tiene permiso para crear roles (`CREATEROLE`), un
+administrador de la base lo crea una vez y después se migra normalmente:
+
+```sql
+CREATE ROLE presupuestos_app NOLOGIN;
+GRANT presupuestos_app TO usuario_api WITH SET TRUE;  -- sin "WITH SET TRUE" en 14/15
 ```
 
 ---
 
-## 8. Seed automático (datos iniciales)
-
-Al **primer arranque** con la base de datos vacía, el `SeedService` crea:
-
-| Recurso | Contenido |
-|---------|-----------|
-| Roles | `ADMIN`, `USER` |
-| Permisos | `users:read`, `users:manage`, `auth:me` |
-| Usuario admin | Email y password de `SEED_ADMIN_*` en `.env` |
-
-Por defecto:
-
-| Campo | Valor |
-|-------|-------|
-| Email | `admin@example.com` |
-| Password | `Admin123!` |
-
-En los logs deberías ver líneas como:
-
-```
-[SeedService] Role created: ADMIN
-[SeedService] Default admin user created: admin@example.com
-[SeedService] Database seed completed
-```
-
-El seed **no** sobrescribe un admin que ya exista con el mismo email.
-
----
-
-## 9. Verificar que todo funciona
-
-### 9.1 Health checks
+## 8. Verificar
 
 ```bash
-# Liveness
-curl http://localhost:3000/api/health
-
-# Readiness (incluye ping a PostgreSQL)
 curl http://localhost:3000/api/health/ready
 ```
-
-Respuesta esperada: `"status": "ok"`.
-
-### 9.2 Login y sesión por cookies
 
 **PowerShell:**
 
 ```powershell
-# Login (guarda cookies)
 curl.exe -X POST http://localhost:3000/api/auth/login `
   -H "Content-Type: application/json" `
   -d '{\"email\":\"admin@example.com\",\"password\":\"Admin123!\"}' `
-  -c cookies.txt -v
-
-# Perfil autenticado
-curl.exe http://localhost:3000/api/auth/me -b cookies.txt
+  -c cookies.txt
+curl.exe http://localhost:3000/api/presupuestos -b cookies.txt
 ```
 
 **Git Bash / Linux / macOS:**
@@ -286,128 +194,52 @@ curl.exe http://localhost:3000/api/auth/me -b cookies.txt
 curl -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@example.com","password":"Admin123!"}' \
-  -c cookies.txt -v
-
-curl http://localhost:3000/api/auth/me -b cookies.txt
+  -c cookies.txt
+curl http://localhost:3000/api/presupuestos -b cookies.txt
 ```
 
-Comprueba que:
+---
 
-- El body del login devuelve `UserResponseDto` (email, fullName, role).
-- **No** hay campo `access_token` en el JSON.
-- En DevTools o en `cookies.txt` existen cookies `access_token` y `refresh_token`.
-
-### 9.3 Swagger
-
-Abre en el navegador:
-
-**http://localhost:3000/api/docs**
-
-### 9.4 Listar usuarios (solo ADMIN)
+## 9. Tests
 
 ```bash
-curl http://localhost:3000/api/users -b cookies.txt
+npm test                                  # unitarios
+DB_NAME=presupuestos_test npm run test:e2e  # contra PostgreSQL real
 ```
 
----
-
-## 10. Tests
-
-### Unitarios
-
-```bash
-npm run test
-```
-
-### End-to-end (requiere PostgreSQL + seed)
-
-```bash
-npm run test:e2e
-```
+Para los e2e conviene una base aparte (vacía): la crean y la migran solos. En PowerShell:
+`$env:DB_NAME="presupuestos_test"; npm run test:e2e`.
 
 ---
 
-## 11. Integración con el frontend Angular
+## 10. Checklist desde cero
 
-1. El backend debe tener `FRONTEND_URL=http://localhost:4200` (o el puerto de tu SPA).
-2. El frontend debe usar `withCredentials: true` en todas las peticiones al API.
-3. Contrato completo para el equipo front: **[FRONTEND_PROMPT.md](./FRONTEND_PROMPT.md)**
-
----
-
-## 12. Scripts npm de referencia
-
-| Comando | Descripción |
-|---------|-------------|
-| `npm run start:dev` | Desarrollo con watch |
-| `npm run build` | Compilar a `dist/` |
-| `npm run start:prod` | Ejecutar build compilado |
-| `npm run lint` | ESLint |
-| `npm run migration:run` | Aplicar migraciones |
-| `npm run migration:revert` | Revertir última migración |
-| `npm run migration:show` | Ver migraciones aplicadas |
-| `npm run test` | Tests unitarios |
-| `npm run test:e2e` | Tests e2e |
-
----
-
-## 13. Setup desde cero (checklist)
-
-Usa esta lista si quieres resetear o validar el entorno:
-
-- [ ] Node.js 20+ instalado
+- [ ] Node.js 20+ y PostgreSQL 14+ instalados
 - [ ] `npm install` sin errores
-- [ ] `.env` creado desde `.env.example`
-- [ ] `JWT_SECRET` definido
-- [ ] `FRONTEND_URL` coincide con tu Angular
-- [ ] PostgreSQL local conectado en pgAdmin **o** Docker `healthy`
-- [ ] Base `back_base_nest` creada (pgAdmin) o contenedor Docker arriba
-- [ ] `TYPEORM_SYNC=true` **o** `npm run migration:run`
-- [ ] `npm run start:dev` → API en puerto 3000
-- [ ] Logs muestran `Database seed completed`
+- [ ] `.env` creado desde `.env.example` (`DB_*`, `JWT_SECRET`, `FRONTEND_URL`)
+- [ ] Base creada y vacía (o la de la versión anterior)
+- [ ] `npm run start:dev` → migraciones aplicadas y `Database seed completed`
 - [ ] `GET /api/health/ready` → OK
-- [ ] Login con `admin@example.com` / `Admin123!` → OK
-- [ ] `GET /api/auth/me` con cookies → OK
+- [ ] Login con el admin del seed → OK
+- [ ] Front (`PresupuestosFront`) con `npm install` y `npm start`
 
 ---
 
-## 14. Solución de problemas
+## 11. Solución de problemas
 
 | Síntoma | Causa probable | Solución |
 |---------|----------------|----------|
-| `ECONNREFUSED` al arrancar | PostgreSQL no corre | Iniciar servicio Windows `postgresql-x64-*` o `docker compose up -d` |
-| `password authentication failed` | Contraseña en `.env` incorrecta | Usar la misma que en pgAdmin ([SETUP-POSTGRES-LOCAL.md](./SETUP-POSTGRES-LOCAL.md)) |
-| `open //./pipe/dockerDesktopLinuxEngine` | Docker apagado (solo si usas Docker) | Abrir Docker Desktop o usar PostgreSQL local |
-| `relation "users" does not exist` | Sin tablas | `TYPEORM_SYNC=true` o `npm run migration:run` |
-| Login `401 Invalid credentials` | Seed no corrió o password incorrecta | Revisar logs del seed; usar credenciales de `.env` |
-| Login `429` | Rate limit o cuenta bloqueada | Esperar 1 min; o resetear `failed_login_attempts` / `locked_until` en BD |
-| Cookies no llegan al API | CORS / origen | Igualar `FRONTEND_URL` al origen del navegador; front con `withCredentials: true` |
-| Cookie ignorada en local | `COOKIE_SECURE=true` sin HTTPS | `COOKIE_SECURE=false` en desarrollo |
-| Puerto 3000 en uso | Otra app ocupando el puerto | Cambiar `PORT` en `.env` o cerrar el proceso |
-| Migraciones fallan | BD vacía vs sync previo | `docker compose down -v` y volver a crear esquema |
-
-### Reset completo de la base de datos
-
-```bash
-docker compose down -v
-docker compose up -d
-# Esperar healthy, luego:
-npm run start:dev
-```
-
----
-
-## 15. Producción (resumen)
-
-Antes de desplegar:
-
-1. `NODE_ENV=production`
-2. `TYPEORM_SYNC=false` — solo migraciones (`npm run migration:run`)
-3. `COOKIE_SECURE=true` y HTTPS
-4. `JWT_SECRET` fuerte y único (nunca el de desarrollo)
-5. Cambiar o eliminar credenciales del seed por defecto
-6. `FRONTEND_URL` = dominio real del frontend
-7. PostgreSQL gestionado (RDS, Cloud SQL, etc.) o contenedor en el servidor
+| `ECONNREFUSED` | PostgreSQL no corre | Iniciar el servicio `postgresql-x64-*` o `docker compose up -d` |
+| `password authentication failed` | `DB_PASSWORD` incorrecta | La misma con la que entrás en pgAdmin |
+| `Hay migraciones pendientes` | `TYPEORM_RUN_MIGRATIONS=false` | `npm run migration:run` |
+| `extension "unaccent" is not available` | Faltan los módulos contrib | Linux: `postgresql-contrib`; Windows: reinstalar con el instalador oficial |
+| `permission denied to create role` | El usuario que migra no tiene `CREATEROLE` | Ver sección 7 |
+| `La API no puede asumir el rol "presupuestos_app"` | La API usa otro usuario | `GRANT` de la sección 7 |
+| Login `401` | Credenciales o seed no corrió | Revisar el log del seed |
+| Login `403` "desactivados" | Usuario o taller desactivado | Reactivar desde *Usuarios* o en la base (`users.is_active`, `talleres.activo`) |
+| Login `429` | Rate limit o bloqueo | Esperar; en desarrollo subir `THROTTLE_LOGIN_LIMIT` |
+| Cookies no llegan | CORS | `FRONTEND_URL` igual al origen del front |
+| Puerto 3000 ocupado | Otro proceso | Cambiar `PORT` o cerrar el proceso |
 
 ---
 
@@ -415,7 +247,7 @@ Antes de desplegar:
 
 | Archivo | Contenido |
 |---------|-----------|
-| [README.md](./README.md) | Visión general del proyecto |
+| [README.md](./README.md) | Visión general, endpoints, seguridad |
+| [docs/ARQUITECTURA.md](./docs/ARQUITECTURA.md) | Modelo de datos, decisiones, flujo |
+| [docs/esquema-completo.sql](./docs/esquema-completo.sql) | Script SQL completo |
 | [SETUP-POSTGRES-LOCAL.md](./SETUP-POSTGRES-LOCAL.md) | PostgreSQL + pgAdmin sin Docker |
-| [FRONTEND_PROMPT.md](./FRONTEND_PROMPT.md) | Prompt para generar el cliente Angular |
-| [.env.example](./.env.example) | Plantilla de variables de entorno |
