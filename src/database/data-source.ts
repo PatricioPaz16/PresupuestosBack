@@ -6,6 +6,7 @@ import { Role } from '../modules/roles/entities/role.entity';
 import { RefreshToken } from '../modules/auth/entities/refresh-token.entity';
 import { Taller } from '../modules/talleres/entities/taller.entity';
 import { User } from '../modules/users/entities/user.entity';
+import { opcionesSsl } from './ssl';
 
 config();
 configurarTiposPg();
@@ -17,6 +18,7 @@ export default new DataSource({
   username: process.env.DB_USERNAME ?? 'postgres',
   password: process.env.DB_PASSWORD ?? 'postgres',
   database: process.env.DB_NAME ?? 'back_base_nest',
+  ssl: opcionesSsl(process.env.DB_SSL === 'true', process.env.DB_SSL_CA),
   entities: [User, Role, Permission, RefreshToken, Taller],
   migrations: ['src/database/migrations/*.ts'],
   migrationsTableName: 'typeorm_migrations',

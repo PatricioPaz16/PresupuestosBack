@@ -59,6 +59,18 @@ Reparto de responsabilidades:
 
 ---
 
+### Despliegue
+
+```
+navegador ─▶ Vercel (front estático) ─/api/*─▶ Render (API NestJS) ─SSL─▶ Supabase (pooler)
+```
+
+El front y la API se ven desde el mismo dominio gracias a la reescritura de Vercel: las
+cookies de sesión son del propio sitio (Safari las acepta) y no hay CORS. Detalle de la
+configuración en `SETUP.md`, sección 7b.
+
+---
+
 ## 3. Multi-taller
 
 ### Modelo
@@ -81,6 +93,11 @@ Reparto de responsabilidades:
 
 El rol de negocio no tiene permisos sobre `users`, `refresh_tokens` ni `roles`: aunque
 hubiera un error en una consulta de negocio, no puede leer credenciales.
+
+En Supabase hay además roles web (`anon`, `authenticated`) a los que la plataforma da
+acceso a todo lo nuevo de `public` para su API REST. La migración `CerrarAccesoExterno`
+se lo quita, cambia los permisos por defecto para tablas futuras y activa RLS en las tablas
+de autenticación.
 
 ### Alta de talleres
 

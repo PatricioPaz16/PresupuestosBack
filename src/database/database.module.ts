@@ -7,6 +7,7 @@ import { Permission } from '../modules/permissions/entities/permission.entity';
 import { Role } from '../modules/roles/entities/role.entity';
 import { Taller } from '../modules/talleres/entities/taller.entity';
 import { User } from '../modules/users/entities/user.entity';
+import { opcionesSsl } from './ssl';
 
 configurarTiposPg();
 
@@ -22,6 +23,10 @@ configurarTiposPg();
         username: configService.get<string>('database.username'),
         password: configService.get<string>('database.password'),
         database: configService.get<string>('database.name'),
+        ssl: opcionesSsl(
+          configService.get<boolean>('database.ssl', false),
+          configService.get<string>('database.sslCa'),
+        ),
         entities: [User, Role, Permission, RefreshToken, Taller],
         // Siempre false: el esquema usa RLS, triggers, columnas generadas y FKs compuestas
         // que `synchronize` no conoce y podría borrar. El esquema se maneja con migraciones.

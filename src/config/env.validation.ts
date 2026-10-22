@@ -1,6 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import {
   IsEnum,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -53,6 +54,18 @@ class EnvironmentVariables {
 
   @IsOptional()
   TYPEORM_SYNC?: string;
+
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  DB_SSL?: string;
+
+  @IsOptional()
+  @IsString()
+  DB_SSL_CA?: string;
+
+  @IsOptional()
+  @IsString()
+  TRUST_PROXY?: string;
 
   @IsOptional()
   TYPEORM_RUN_MIGRATIONS?: string;

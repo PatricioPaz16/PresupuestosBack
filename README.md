@@ -13,6 +13,7 @@ compuestas).
 - Arquitectura, modelo de datos y decisiones: [docs/ARQUITECTURA.md](./docs/ARQUITECTURA.md).
 - Script SQL completo (para leer o crear la base a mano): [docs/esquema-completo.sql](./docs/esquema-completo.sql).
 - Guías de instalación: [SETUP.md](./SETUP.md) · [SETUP-POSTGRES-LOCAL.md](./SETUP-POSTGRES-LOCAL.md).
+- Producción con Supabase + Render + Vercel: [SETUP.md, sección 7b](./SETUP.md#7b-producción-supabase--render--vercel).
 
 ---
 
@@ -119,6 +120,11 @@ GRANT presupuestos_app TO usuario_api WITH SET TRUE;  -- PostgreSQL 16 o superio
 
 Al arrancar, la API comprueba que puede asumir ese rol y, si no, lo avisa en el log.
 
+En **Supabase**, la migración `CerrarAccesoExterno` les quita a los roles `anon` y
+`authenticated` el acceso a las tablas (Supabase las publica por su API REST) y activa RLS
+en las de autenticación. En un PostgreSQL común no hace nada. Conexión: pooler con
+`DB_SSL=true` (ver SETUP.md, sección 7b).
+
 ---
 
 ## Scripts npm
@@ -152,11 +158,11 @@ Al arrancar, la API comprueba que puede asumir ese rol y, si no, lo avisa en el 
 
 ## Producción (checklist)
 
-1. `NODE_ENV=production`, `COOKIE_SECURE=true` y HTTPS.
+1. `NODE_ENV=production`, `COOKIE_SECURE=true` y HTTPS. Detrás de Render/Vercel, `TRUST_PROXY=true`.
 2. `JWT_SECRET` largo, aleatorio y único.
 3. `FRONTEND_URL` igual al dominio real del front.
 4. Usuario de PostgreSQL **sin** superusuario para la API (ver permiso del rol arriba).
-5. Cambiar la contraseña del administrador inicial al primer ingreso; `SEED_DEMO=false`.
+5. `SEED_ADMIN_PASSWORD` propia (no la del ejemplo) y `SEED_DEMO=false`.
 6. Backups automáticos de la base.
 
 ---

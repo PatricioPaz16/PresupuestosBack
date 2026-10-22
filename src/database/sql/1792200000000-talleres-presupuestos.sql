@@ -42,10 +42,24 @@ CREATE EXTENSION IF NOT EXISTS unaccent;  -- "bujia" encuentra "Bujía"
 
 -- unaccent() es STABLE y no se puede usar en índices. Este envoltorio IMMUTABLE con el
 -- diccionario calificado sí (patrón estándar; el diccionario no cambia).
-CREATE OR REPLACE FUNCTION f_unaccent(texto text)
-RETURNS text
-LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
-AS $$ SELECT public.unaccent('public.unaccent'::regdictionary, texto) $$;
+-- El esquema de la extensión se busca: en Supabase puede estar en "extensions".
+DO $$
+DECLARE
+  v_esquema text;
+BEGIN
+  SELECT n.nspname INTO STRICT v_esquema
+    FROM pg_extension e
+    JOIN pg_namespace n ON n.oid = e.extnamespace
+   WHERE e.extname = 'unaccent';
+
+  EXECUTE format(
+    'CREATE OR REPLACE FUNCTION f_unaccent(texto text)
+       RETURNS text
+       LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
+       AS $f$ SELECT %1$I.unaccent(%2$L::regdictionary, texto) $f$',
+    v_esquema, format('%I.unaccent', v_esquema));
+END
+$$;
 
 -- Taller de la transacción en curso (lo fija la API). NULL si no hay contexto.
 -- NULLIF cubre el caso en que la variable quedó en '' después de una transacción previa.

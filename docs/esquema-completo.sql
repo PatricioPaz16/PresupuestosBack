@@ -3,13 +3,14 @@
 --
 --  Crea toda la base en una base de datos VACÍA, en un solo paso:
 --    psql -U postgres -d presupuestos -v ON_ERROR_STOP=1 -f esquema-completo.sql
---  o desde pgAdmin > Query Tool (abrir el archivo y ejecutar).
+--  o desde pgAdmin / el SQL Editor de Supabase (abrir el archivo y ejecutar).
 --  Corre dentro de una transacción: si algo falla, no queda nada a medias.
 --
---  Es la suma de las dos migraciones del proyecto:
+--  Es la suma de las migraciones del proyecto:
 --    1. InitialSchema            usuarios, roles, permisos y sesiones (autenticación)
 --    2. TalleresPresupuestos     talleres, clientes, vehículos, catálogo, presupuestos,
 --                                triggers de totales y numeración, Row Level Security
+--    3. CerrarAccesoExterno      en Supabase: quita el acceso de la API REST pública
 --  Al final las registra en la tabla de migraciones de TypeORM, así la API no intenta
 --  volver a aplicarlas cuando arranca.
 --
@@ -79,6 +80,7 @@ CREATE TABLE IF NOT EXISTS "refresh_tokens" (
 
 CREATE INDEX IF NOT EXISTS "IDX_refresh_tokens_user_id" ON "refresh_tokens" ("user_id");
 
+
 -- =====================================================================================
 --  PARTE 2 — TALLERES Y PRESUPUESTOS (migración TalleresPresupuestos1792200000000)
 -- =====================================================================================
@@ -127,10 +129,24 @@ CREATE EXTENSION IF NOT EXISTS unaccent;  -- "bujia" encuentra "Bujía"
 
 -- unaccent() es STABLE y no se puede usar en índices. Este envoltorio IMMUTABLE con el
 -- diccionario calificado sí (patrón estándar; el diccionario no cambia).
-CREATE OR REPLACE FUNCTION f_unaccent(texto text)
-RETURNS text
-LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
-AS $$ SELECT public.unaccent('public.unaccent'::regdictionary, texto) $$;
+-- El esquema de la extensión se busca: en Supabase puede estar en "extensions".
+DO $$
+DECLARE
+  v_esquema text;
+BEGIN
+  SELECT n.nspname INTO STRICT v_esquema
+    FROM pg_extension e
+    JOIN pg_namespace n ON n.oid = e.extnamespace
+   WHERE e.extname = 'unaccent';
+
+  EXECUTE format(
+    'CREATE OR REPLACE FUNCTION f_unaccent(texto text)
+       RETURNS text
+       LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
+       AS $f$ SELECT %1$I.unaccent(%2$L::regdictionary, texto) $f$',
+    v_esquema, format('%I.unaccent', v_esquema));
+END
+$$;
 
 -- Taller de la transacción en curso (lo fija la API). NULL si no hay contexto.
 -- NULLIF cubre el caso en que la variable quedó en '' después de una transacción previa.
@@ -741,8 +757,73 @@ CREATE TABLE IF NOT EXISTS typeorm_migrations (
 INSERT INTO typeorm_migrations ("timestamp", name)
 SELECT m.ts, m.nombre
   FROM (VALUES (1747400000000::bigint, 'InitialSchema1747400000000'),
-               (1792200000000::bigint, 'TalleresPresupuestos1792200000000')) AS m (ts, nombre)
- WHERE NOT EXISTS (SELECT 1 FROM typeorm_migrations t WHERE t.name = m.nombre);
+               (1792200000000::bigint, 'TalleresPresupuestos1792200000000'),
+               (1792460000000::bigint, 'CerrarAccesoExterno1792460000000')) AS m (ts, nombre)
+ WHERE NOT EXISTS (SELECT 1 FROM typeorm_migrations t WHERE t.name = m.nombre)
+ ORDER BY m.ts;
+
+
+-- =====================================================================================
+--  PARTE 3 — SUPABASE: CERRAR LA API PÚBLICA (migración CerrarAccesoExterno1792460000000)
+--  Va después del registro para cubrir también la tabla typeorm_migrations.
+-- =====================================================================================
+
+-- =====================================================================================
+--  Cerrar el acceso de los roles web de Supabase / PostgREST ("anon" y "authenticated")
+--
+--  Supabase publica el esquema "public" por su API REST y GraphQL y, por defecto, les da
+--  permisos completos a esos roles sobre cada tabla nueva. Con la clave "anon" del
+--  proyecto (que no es secreta) alguien podría leer usuarios o modificar datos sin pasar
+--  por la API de la app. Esta app no usa esa API: todo pasa por NestJS.
+--
+--   - Quita los permisos de esos roles sobre las tablas y secuencias de la app.
+--   - Cambia los permisos por defecto para que las tablas de migraciones futuras tampoco
+--     queden expuestas.
+--   - Activa RLS (sin políticas) en las tablas que no la tenían: segunda barrera si
+--     alguien vuelve a dar permisos. La API se conecta como dueña de las tablas, así que
+--     no la afecta.
+--
+--  En un PostgreSQL sin esos roles (instalación local, Docker) no hace nada.
+-- =====================================================================================
+DO $$
+DECLARE
+  v_rol   text;
+  v_tabla text;
+  v_tablas_app text[] := ARRAY[
+    'users', 'roles', 'permissions', 'role_permissions', 'refresh_tokens', 'typeorm_migrations',
+    'talleres', 'numeradores', 'clientes', 'vehiculos', 'catalogo_items', 'presupuestos',
+    'presupuesto_items'];
+  v_sin_rls text[] := ARRAY[
+    'users', 'roles', 'permissions', 'role_permissions', 'refresh_tokens', 'typeorm_migrations'];
+  v_hay_roles_web boolean := false;
+BEGIN
+  FOREACH v_rol IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_rol);
+    v_hay_roles_web := true;
+
+    FOREACH v_tabla IN ARRAY v_tablas_app LOOP
+      IF to_regclass(format('public.%I', v_tabla)) IS NOT NULL THEN
+        EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', v_tabla, v_rol);
+      END IF;
+    END LOOP;
+    EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM %I', v_rol);
+
+    -- Permisos por defecto de lo que cree este usuario (por esquema y globales).
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM %I', v_rol);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM %I', v_rol);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES REVOKE ALL ON TABLES FROM %I', v_rol);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES REVOKE ALL ON SEQUENCES FROM %I', v_rol);
+  END LOOP;
+
+  IF v_hay_roles_web THEN
+    FOREACH v_tabla IN ARRAY v_sin_rls LOOP
+      IF to_regclass(format('public.%I', v_tabla)) IS NOT NULL THEN
+        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', v_tabla);
+      END IF;
+    END LOOP;
+  END IF;
+END
+$$;
 
 COMMIT;
 

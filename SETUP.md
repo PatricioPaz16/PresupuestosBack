@@ -172,6 +172,78 @@ GRANT presupuestos_app TO usuario_api WITH SET TRUE;  -- sin "WITH SET TRUE" en 
 
 ---
 
+## 7b. Producción: Supabase + Render + Vercel
+
+Cómo queda armado:
+
+```
+navegador ──▶ Vercel (front, presupuestos-front.vercel.app)
+                 │  /api/*  (reescritura en vercel.json, mismo dominio)
+                 ▼
+              Render (esta API, Node)  ──SSL──▶  Supabase (PostgreSQL, pooler)
+```
+
+El front llama a `/api` en su propio dominio y Vercel lo reenvía a Render. Así las
+cookies de sesión son del mismo sitio: funcionan en Safari / iPhone (que bloquean cookies
+de otro dominio) y no hace falta CORS.
+
+### Supabase
+
+- Usá los datos del **pooler** (botón **Connect** del proyecto, "Shared pooler"): host
+  `aws-…pooler.supabase.com`, puerto `6543`, usuario `postgres.<referencia>`, base
+  `postgres`, y `DB_SSL=true`. La conexión directa (`db.<ref>.supabase.co`) es solo IPv6 y
+  Render no la alcanza.
+- El modo transacción del pooler (6543) es compatible: el rol y el taller se fijan por
+  transacción (`SET LOCAL`), no por sesión.
+- Supabase publica las tablas de `public` en su API REST para los roles `anon` y
+  `authenticated`. La migración `CerrarAccesoExterno` les quita el acceso y activa RLS en
+  las tablas de autenticación. Como la app no usa esa API, también podés apagarla desde
+  la configuración de la Data API del proyecto.
+- No corras los tests e2e contra Supabase: escriben datos de prueba. Están bloqueados si
+  `DB_HOST` no es local (se puede forzar con `E2E_PERMITIR_BASE_REMOTA=true`).
+
+### Render (Web Service)
+
+| Campo | Valor |
+|-------|-------|
+| Root Directory | vacío |
+| Build Command | `npm ci --include=dev && npm run build` |
+| Start Command | `npm run start:prod` |
+| Health Check Path | `/api/health/ready` |
+| Región | la misma que Supabase (por ejemplo Oregon para `us-west-2`) |
+
+`--include=dev` hace falta porque con `NODE_ENV=production` npm no instala el compilador.
+La versión de Node sale de `.node-version` (22). No definas `PORT`: Render lo pone solo.
+
+Variables de entorno (Environment > Add from .env):
+
+```env
+NODE_ENV=production
+FRONTEND_URL=https://<tu-front>.vercel.app
+DB_HOST=aws-…pooler.supabase.com
+DB_PORT=6543
+DB_USERNAME=postgres.<referencia>
+DB_PASSWORD=<contraseña de la base>
+DB_NAME=postgres
+DB_SSL=true
+TYPEORM_RUN_MIGRATIONS=true
+JWT_SECRET=<cadena aleatoria larga>
+COOKIE_SECURE=true
+COOKIE_SAME_SITE=strict
+TRUST_PROXY=true
+SEED_ADMIN_EMAIL=admin@example.com
+SEED_ADMIN_PASSWORD=<contraseña fuerte, se usa solo en el primer arranque>
+SEED_DEMO=false
+```
+
+En el plan gratuito, Render apaga el servicio tras 15 minutos sin uso: el primer pedido
+después tarda alrededor de un minuto (Vercel espera hasta 120 s).
+
+### Vercel (front)
+
+`PresupuestosFront/vercel.json` reenvía `/api/*` a la URL de Render y manda el resto de
+las rutas a `index.html`. Si la URL de Render cambia, se actualiza ahí.
+
 ## 8. Verificar
 
 ```bash
