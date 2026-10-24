@@ -149,7 +149,7 @@ Datos del encabezado del presupuesto y valores por defecto.
 | email | text | |
 | documento | text | DNI o CUIT, solo dígitos |
 | notas | text | Internas |
-| archivado_en | timestamptz | Baja lógica |
+| archivado_en | timestamptz | Baja lógica ("dar de baja"): no aparece al buscar ni en los desplegables |
 | busqueda | text generada | nombre + apellido + razón social sin acentos, con índice trigram |
 
 ### vehiculos
@@ -162,6 +162,20 @@ Datos del encabezado del presupuesto y valores por defecto.
 | anio, color | | |
 | combustible | enum | nafta, diesel, nafta_gnc, hibrido, electrico, otro |
 | vin | text | 17 caracteres, opcional |
+| archivado_en | timestamptz | Baja lógica. La patente sigue reservada: al escribirla se ofrece darla de alta de nuevo |
+
+### Alta y baja, cambio de dueño
+
+- **Baja de un vehículo** (`POST /vehiculos/:id/baja`): deja de aparecer en búsquedas y
+  listas; sus presupuestos quedan. No se le pueden hacer presupuestos nuevos (la API
+  responde 400) hasta darlo de **alta** de nuevo (`POST /vehiculos/:id/alta`). Si el dueño
+  también estaba dado de baja, vuelve con el vehículo.
+- **Baja de un cliente** (`POST /clientes/:id/baja`): se dan de baja él y sus vehículos
+  activos con la **misma marca de tiempo**. El alta devuelve exactamente esos vehículos, no
+  los que ya estaban dados de baja de antes.
+- **Cambio de dueño** (`PATCH /vehiculos/:id/duenio`, a un cliente existente o a uno nuevo
+  en la misma transacción): cambia `vehiculos.cliente_id`. Los presupuestos anteriores
+  conservan su `cliente_id`, así el historial de cada cliente no cambia.
 
 ### catalogo_items
 
@@ -354,6 +368,7 @@ impresión o el mensaje de WhatsApp los muestren por error.
 | Solo migraciones | `synchronize` de TypeORM | No crea triggers, políticas ni columnas generadas, y puede borrar datos |
 | Logo en la base (data URL) | Archivos en disco o S3 | Un archivo chico; cero infraestructura extra |
 | Normalizar patente y teléfono al guardar | Guardar como se tipeó | Búsquedas exactas, WhatsApp sin errores |
+| Baja lógica (`archivado_en`) de clientes y vehículos | Borrar | Los presupuestos los referencian; la patente queda reservada y se puede revertir |
 
 ---
 

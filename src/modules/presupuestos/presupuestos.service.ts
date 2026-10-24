@@ -217,6 +217,7 @@ export class PresupuestosService {
   ): Promise<PresupuestoDetalleDto> {
     const items = this.normalizarItems(dto.items, new Set());
     const detalle = await this.tenant.run(tallerId, async (em) => {
+      await this.verificarVehiculoActivo(em, dto.vehiculoId);
       const clienteId =
         dto.clienteId ?? (await this.duenioDelVehiculo(em, dto.vehiculoId));
       const [fila] = await em.query<Array<{ id: string }>>(
@@ -249,6 +250,9 @@ export class PresupuestosService {
         );
       }
       this.verificarVersion(actual.version, dto.version);
+      if (dto.vehiculoId !== actual.vehiculoId) {
+        await this.verificarVehiculoActivo(em, dto.vehiculoId);
+      }
 
       const existentes = new Set(
         (
@@ -323,6 +327,13 @@ export class PresupuestosService {
     id: string,
   ): Promise<PresupuestoDetalleDto> {
     const detalle = await this.tenant.run(tallerId, async (em) => {
+      const [origen] = await em.query<Array<{ vehiculoId: string }>>(
+        `SELECT vehiculo_id AS "vehiculoId" FROM presupuestos WHERE id = $1`,
+        [id],
+      );
+      if (origen) {
+        await this.verificarVehiculoActivo(em, origen.vehiculoId);
+      }
       const [nuevo] = await em.query<Array<{ id: string }>>(
         `INSERT INTO presupuestos
                 (cliente_id, vehiculo_id, creado_por, validez_dias, kilometraje, motivo_ingreso,
@@ -414,11 +425,21 @@ export class PresupuestosService {
   private async bloquear(
     em: EntityManager,
     id: string,
-  ): Promise<{ estado: EstadoPresupuesto; version: number; items: number }> {
+  ): Promise<{
+    estado: EstadoPresupuesto;
+    version: number;
+    items: number;
+    vehiculoId: string;
+  }> {
     const [fila] = await em.query<
-      Array<{ estado: EstadoPresupuesto; version: number; items: number }>
+      Array<{
+        estado: EstadoPresupuesto;
+        version: number;
+        items: number;
+        vehiculoId: string;
+      }>
     >(
-      `SELECT p.estado, p.version,
+      `SELECT p.estado, p.version, p.vehiculo_id AS "vehiculoId",
               (SELECT count(*) FROM presupuesto_items i WHERE i.presupuesto_id = p.id)::int AS items
          FROM presupuestos p
         WHERE p.id = $1
@@ -441,6 +462,24 @@ export class PresupuestosService {
           'Otra persona guardó cambios en este presupuesto mientras lo editabas. ' +
           'Recargalo para ver la versión actual.',
       });
+    }
+  }
+
+  /** Un vehículo dado de baja no recibe presupuestos nuevos (hay que darlo de alta antes). */
+  private async verificarVehiculoActivo(
+    em: EntityManager,
+    vehiculoId: string,
+  ): Promise<void> {
+    const [fila] = await em.query<
+      Array<{ patente: string; archivado: boolean }>
+    >(
+      `SELECT patente, archivado_en IS NOT NULL AS archivado FROM vehiculos WHERE id = $1`,
+      [vehiculoId],
+    );
+    if (fila?.archivado) {
+      throw new BadRequestException(
+        `El vehículo ${fila.patente} está dado de baja. Volvé a darlo de alta para hacerle un presupuesto.`,
+      );
     }
   }
 

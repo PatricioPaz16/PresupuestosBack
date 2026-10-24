@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsEmail,
   IsInt,
   IsOptional,
@@ -21,6 +22,68 @@ export interface ClienteDto {
   email: string | null;
   documento: string | null;
   notas: string | null;
+}
+
+/** Cliente en los desplegables: con las patentes de sus vehículos para distinguirlo. */
+export interface ClienteOpcionDto extends ClienteDto {
+  patentes: string[];
+}
+
+export interface VehiculoDeListadoDto {
+  id: string;
+  patente: string;
+  marca: string;
+  modelo: string;
+}
+
+export interface ClienteListadoDto extends ClienteDto {
+  archivadoEn: string | null;
+  /** Vehículos activos. */
+  vehiculos: VehiculoDeListadoDto[];
+  vehiculosDeBaja: number;
+  presupuestos: number;
+  ultimoPresupuesto: string | null;
+}
+
+export interface PaginaClientesDto {
+  items: ClienteListadoDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface VehiculoDeFichaDto {
+  id: string;
+  patente: string;
+  marca: string;
+  modelo: string;
+  version: string | null;
+  anio: number | null;
+  color: string | null;
+  combustible: string | null;
+  archivadoEn: string | null;
+  /** Presupuestos del vehículo (con este u otros dueños). */
+  presupuestos: number;
+  ultimoPresupuesto: string | null;
+}
+
+export interface PresupuestoDeFichaDto {
+  id: string;
+  numero: number;
+  numeroFormateado: string;
+  estado: string;
+  fechaEmision: string;
+  validoHasta: string;
+  total: string;
+  patente: string;
+  vehiculo: string;
+}
+
+/** Todo lo de un cliente para su pantalla: datos, vehículos (activos y dados de baja) y presupuestos. */
+export interface ClienteFichaDto {
+  cliente: ClienteDto & { archivadoEn: string | null; creadoEn: string };
+  vehiculos: VehiculoDeFichaDto[];
+  presupuestos: PresupuestoDeFichaDto[];
 }
 
 export class ClienteInputDto {
@@ -76,7 +139,10 @@ export class ClienteInputDto {
 export class ActualizarClienteDto extends PartialType(ClienteInputDto) {}
 
 export class BuscarClientesQuery {
-  @ApiPropertyOptional({ description: 'Nombre, apellido o empresa' })
+  @ApiPropertyOptional({
+    description:
+      'Nombre, apellido, empresa, parte del teléfono o DNI/CUIT. Vacío: los últimos atendidos',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(100)
@@ -97,4 +163,38 @@ export class BuscarClientesQuery {
   @Min(1)
   @Max(50)
   limit?: number;
+}
+
+export class ListarClientesQuery {
+  @ApiPropertyOptional({
+    description: 'Nombre, apellido, empresa, teléfono, DNI/CUIT o patente',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+
+  @ApiPropertyOptional({
+    default: false,
+    description: 'true: solo los dados de baja',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  archivados?: boolean;
+
+  @ApiPropertyOptional({ default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiPropertyOptional({ default: 25 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  pageSize?: number;
 }

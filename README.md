@@ -83,9 +83,15 @@ El detalle de cada body/respuesta está en Swagger.
 | PATCH | `/presupuestos/:id/estado` | Sesión | Cambia el estado (borrador / enviado / aprobado / rechazado) |
 | POST | `/presupuestos/:id/duplicar` | Sesión | Copia como borrador nuevo |
 | DELETE | `/presupuestos/:id` | Sesión | Elimina (solo borradores) |
-| GET | `/vehiculos/buscar?patente=` | Sesión | Busca por patente (exacta y parecidas) con cliente e historial |
+| GET | `/vehiculos/buscar?q=` | Sesión | Busca por patente (exacta y parecidas, también dadas de baja) o por cliente (nombre, empresa, teléfono o documento) con todos sus vehículos. Sin `q`: últimos atendidos |
 | GET / POST / PATCH | `/vehiculos`, `/vehiculos/:id` | Sesión | Alta rápida (con cliente nuevo o existente) y edición |
-| GET / POST / PATCH | `/clientes`, `/clientes/:id` | Sesión | Búsqueda por nombre o teléfono, alta y edición |
+| POST | `/vehiculos/:id/baja`, `/vehiculos/:id/alta` | Sesión | Dar de baja / volver a dar de alta (los presupuestos quedan) |
+| PATCH | `/vehiculos/:id/duenio` | Sesión | Cambio de dueño: cliente existente (`clienteId`) o nuevo (`cliente`) |
+| GET | `/clientes?q=` | Sesión | Para los desplegables: por nombre, empresa, teléfono o documento, con sus patentes. Sin `q`: últimos atendidos |
+| GET | `/clientes/listado` | Sesión | Pantalla Clientes: búsqueda (también por patente), `archivados`, paginado |
+| GET | `/clientes/:id/ficha` | Sesión | Datos, vehículos (activos y dados de baja) y presupuestos del cliente |
+| POST / PATCH | `/clientes`, `/clientes/:id` | Sesión | Alta y edición de datos |
+| POST | `/clientes/:id/baja`, `/clientes/:id/alta` | Sesión | Baja del cliente y sus vehículos activos / alta de nuevo |
 | GET / POST / PATCH | `/catalogo`, `/catalogo/:id` | Sesión | Repuestos y trabajos frecuentes |
 | POST | `/catalogo/ajuste-precios` | ADMIN | Aumento masivo por porcentaje, con redondeo |
 | GET / POST / PATCH | `/users`, `/users/:id` | ADMIN | Usuarios del propio taller |
@@ -200,8 +206,8 @@ src/
 │   ├── auth/            # Login, refresh, logout, sesión
 │   ├── users/           # Usuarios del taller
 │   ├── talleres/        # Configuración del taller
-│   ├── clientes/
-│   ├── vehiculos/       # Búsqueda por patente y alta rápida
+│   ├── clientes/        # Listado, ficha, alta/baja
+│   ├── vehiculos/       # Búsqueda, alta rápida, alta/baja y cambio de dueño
 │   ├── catalogo/        # Repuestos y trabajos frecuentes
 │   ├── presupuestos/    # Alta, edición, estados, documento imprimible
 │   └── health/

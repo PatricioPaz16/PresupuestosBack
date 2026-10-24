@@ -11,10 +11,16 @@ import {
   formatoPatente,
   normalizarPatente,
 } from '../../common/normalizers/patente';
-import { ClientesService } from '../clientes/clientes.service';
+import {
+  ClientesService,
+  COLUMNAS_CLIENTE,
+  condicionesBusquedaCliente,
+} from '../clientes/clientes.service';
 import {
   ActualizarVehiculoDto,
   BuscarPatenteResponseDto,
+  CambiarDuenioDto,
+  ClienteConVehiculosDto,
   CrearVehiculoDto,
   VehiculoDetalleDto,
   VehiculoInputDto,
@@ -26,7 +32,7 @@ const SELECT_DETALLE = `
   SELECT json_build_object(
            'id', v.id, 'patente', v.patente, 'marca', v.marca, 'modelo', v.modelo,
            'version', v.version, 'anio', v.anio, 'color', v.color, 'combustible', v.combustible,
-           'vin', v.vin, 'notas', v.notas,
+           'vin', v.vin, 'notas', v.notas, 'archivadoEn', v.archivado_en,
            'cliente', json_build_object(
               'id', c.id, 'nombre', c.nombre, 'apellido', c.apellido, 'razonSocial', c.razon_social,
               'telefono', c.telefono, 'email', c.email, 'documento', c.documento, 'notas', c.notas),
@@ -53,13 +59,27 @@ export class VehiculosService {
     private readonly clientes: ClientesService,
   ) {}
 
-  /** Busca por patente exacta y, si se escribió parte, devuelve coincidencias. */
-  buscarPorPatente(
-    tallerId: string,
-    entrada: string,
-  ): Promise<BuscarPatenteResponseDto> {
-    const patente = normalizarPatente(entrada);
+  /**
+   * Búsqueda del armado del presupuesto. Lo escrito puede ser una patente (completa o
+   * parte), el nombre o la empresa del cliente, su teléfono o su documento. Sin texto,
+   * devuelve los últimos vehículos atendidos para elegir de la lista.
+   */
+  buscar(tallerId: string, entrada: string): Promise<BuscarPatenteResponseDto> {
+    const texto = entrada.trim();
+    const patente = normalizarPatente(texto);
     return this.tenant.run(tallerId, async (em) => {
+      if (!texto) {
+        return {
+          patente: '',
+          formato: formatoPatente(''),
+          valida: false,
+          vehiculo: null,
+          coincidencias: [],
+          clientes: [],
+          recientes: await this.recientes(em),
+        };
+      }
+
       const vehiculo = patente
         ? await this.leerPor(em, 'v.patente = $1', patente)
         : null;
@@ -78,14 +98,69 @@ export class VehiculosService {
         );
       }
 
+      const clientes =
+        texto.length >= 2 ? await this.buscarClientes(em, texto) : [];
+
       return {
         patente,
         formato: formatoPatente(patente),
         valida: esPatenteValida(patente),
         vehiculo,
         coincidencias,
+        clientes,
+        recientes: [],
       };
     });
+  }
+
+  /** Últimos vehículos activos con presupuesto (o cargados), el más reciente primero. */
+  private recientes(em: EntityManager): Promise<VehiculoResumenDto[]> {
+    return em.query<VehiculoResumenDto[]>(
+      `SELECT v.id, v.patente, v.marca, v.modelo, v.anio,
+              btrim(c.nombre || ' ' || coalesce(c.apellido, '')) AS "clienteNombre"
+         FROM vehiculos v
+         JOIN clientes c ON c.taller_id = v.taller_id AND c.id = v.cliente_id
+         LEFT JOIN LATERAL (
+           SELECT max(p.created_at) AS ultima
+             FROM presupuestos p
+            WHERE p.taller_id = v.taller_id AND p.vehiculo_id = v.id) u ON true
+        WHERE v.archivado_en IS NULL
+        ORDER BY greatest(u.ultima, v.created_at) DESC
+        LIMIT 8`,
+    );
+  }
+
+  /** Clientes por nombre/empresa (todas las palabras), teléfono o documento, con sus autos. */
+  private async buscarClientes(
+    em: EntityManager,
+    texto: string,
+  ): Promise<ClienteConVehiculosDto[]> {
+    const valores: unknown[] = [];
+    const condiciones = condicionesBusquedaCliente(texto, valores);
+    if (condiciones.length === 0) {
+      return [];
+    }
+
+    return await em.query<ClienteConVehiculosDto[]>(
+      `SELECT ${COLUMNAS_CLIENTE},
+              coalesce((
+                SELECT json_agg(json_build_object(
+                         'id', v.id, 'patente', v.patente, 'marca', v.marca,
+                         'modelo', v.modelo, 'anio', v.anio)
+                       ORDER BY u.ultima DESC NULLS LAST, v.created_at DESC)
+                  FROM vehiculos v
+                  LEFT JOIN LATERAL (
+                    SELECT max(p.fecha_emision) AS ultima
+                      FROM presupuestos p
+                     WHERE p.vehiculo_id = v.id) u ON true
+                 WHERE v.taller_id = c.taller_id AND v.cliente_id = c.id
+                   AND v.archivado_en IS NULL), '[]'::json) AS vehiculos
+         FROM clientes c
+        WHERE c.archivado_en IS NULL AND (${condiciones.join(' OR ')})
+        ORDER BY c.nombre, c.apellido NULLS FIRST
+        LIMIT 5`,
+      valores,
+    );
   }
 
   obtener(tallerId: string, id: string): Promise<VehiculoDetalleDto> {
@@ -162,6 +237,85 @@ export class VehiculosService {
       );
       return (await this.leerPor(em, 'v.id = $1', id))!;
     });
+  }
+
+  /**
+   * Baja: el vehículo deja de aparecer en búsquedas y listas. Sus presupuestos quedan y la
+   * patente sigue reservada (al escribirla se ofrece darla de alta de nuevo).
+   */
+  darDeBaja(tallerId: string, id: string): Promise<VehiculoDetalleDto> {
+    return this.tenant.run(tallerId, async (em) => {
+      await this.leerOError(em, id);
+      await em.query(
+        `UPDATE vehiculos SET archivado_en = coalesce(archivado_en, now()) WHERE id = $1`,
+        [id],
+      );
+      return (await this.leerPor(em, 'v.id = $1', id))!;
+    });
+  }
+
+  /** Alta de nuevo. Si el dueño también estaba dado de baja, vuelve con el vehículo. */
+  darDeAlta(tallerId: string, id: string): Promise<VehiculoDetalleDto> {
+    return this.tenant.run(tallerId, async (em) => {
+      const actual = await this.leerOError(em, id);
+      if (actual.archivadoEn) {
+        await em.query(
+          `UPDATE vehiculos SET archivado_en = NULL WHERE id = $1`,
+          [id],
+        );
+        await em.query(
+          `UPDATE clientes SET archivado_en = NULL
+            WHERE id = $1 AND archivado_en IS NOT NULL`,
+          [actual.cliente.id],
+        );
+      }
+      return (await this.leerPor(em, 'v.id = $1', id))!;
+    });
+  }
+
+  /**
+   * Cambio de dueño (por ejemplo, el auto se vendió): a un cliente existente o a uno nuevo.
+   * Los presupuestos anteriores quedan a nombre de quien era el dueño en ese momento.
+   */
+  cambiarDuenio(
+    tallerId: string,
+    id: string,
+    dto: CambiarDuenioDto,
+  ): Promise<VehiculoDetalleDto> {
+    if (!dto.clienteId === !dto.cliente) {
+      throw new BadRequestException(
+        'Elegí un cliente existente o cargá los datos del nuevo dueño.',
+      );
+    }
+    return this.tenant.run(tallerId, async (em) => {
+      const actual = await this.leerOError(em, id);
+      if (actual.archivadoEn) {
+        throw new BadRequestException(
+          'El vehículo está dado de baja. Volvé a darlo de alta para cambiarle el dueño.',
+        );
+      }
+      const clienteId = dto.clienteId
+        ? (await this.clientes.leerActivo(em, dto.clienteId)).id
+        : (await this.clientes.crearEn(em, dto.cliente!)).id;
+      if (clienteId !== actual.cliente.id) {
+        await em.query(`UPDATE vehiculos SET cliente_id = $2 WHERE id = $1`, [
+          id,
+          clienteId,
+        ]);
+      }
+      return (await this.leerPor(em, 'v.id = $1', id))!;
+    });
+  }
+
+  private async leerOError(
+    em: EntityManager,
+    id: string,
+  ): Promise<VehiculoDetalleDto> {
+    const vehiculo = await this.leerPor(em, 'v.id = $1', id);
+    if (!vehiculo) {
+      throw new NotFoundException('Vehículo no encontrado.');
+    }
+    return vehiculo;
   }
 
   private async leerPor(

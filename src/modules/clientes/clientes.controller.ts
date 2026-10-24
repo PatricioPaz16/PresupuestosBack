@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -16,7 +18,11 @@ import {
   ActualizarClienteDto,
   BuscarClientesQuery,
   ClienteDto,
+  ClienteFichaDto,
   ClienteInputDto,
+  ClienteOpcionDto,
+  ListarClientesQuery,
+  PaginaClientesDto,
 } from './dto/cliente.dto';
 
 @ApiTags('clientes')
@@ -27,13 +33,69 @@ export class ClientesController {
 
   @Get()
   @ApiOperation({
-    summary: 'Buscar clientes por nombre/empresa o por teléfono',
+    summary: 'Clientes para elegir (desplegables)',
+    description:
+      'Por nombre, empresa, teléfono o documento. Sin texto, los últimos atendidos. ' +
+      'Solo clientes activos, con las patentes de sus vehículos.',
   })
   buscar(
     @TallerId() tallerId: string,
     @Query() query: BuscarClientesQuery,
-  ): Promise<ClienteDto[]> {
+  ): Promise<ClienteOpcionDto[]> {
     return this.clientes.buscar(tallerId, query);
+  }
+
+  // Antes de ":id" para que "listado" no se tome como un id.
+  @Get('listado')
+  @ApiOperation({
+    summary: 'Listado de clientes (pantalla Clientes)',
+    description:
+      'Búsqueda por nombre, teléfono, documento o patente; activos o dados de baja; paginado.',
+  })
+  listado(
+    @TallerId() tallerId: string,
+    @Query() query: ListarClientesQuery,
+  ): Promise<PaginaClientesDto> {
+    return this.clientes.listado(tallerId, query);
+  }
+
+  @Get(':id/ficha')
+  @ApiOperation({
+    summary:
+      'Ficha del cliente: datos, vehículos (también los dados de baja) y presupuestos',
+  })
+  ficha(
+    @TallerId() tallerId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<ClienteFichaDto> {
+    return this.clientes.ficha(tallerId, id);
+  }
+
+  @Post(':id/baja')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Dar de baja al cliente y a sus vehículos activos',
+    description:
+      'Dejan de aparecer al buscar. Los presupuestos quedan. Se revierte con /alta.',
+  })
+  darDeBaja(
+    @TallerId() tallerId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<ClienteFichaDto> {
+    return this.clientes.darDeBaja(tallerId, id);
+  }
+
+  @Post(':id/alta')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Volver a dar de alta al cliente (y los vehículos que se dieron de baja con él)',
+  })
+  darDeAlta(
+    @TallerId() tallerId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<ClienteFichaDto> {
+    return this.clientes.darDeAlta(tallerId, id);
   }
 
   @Get(':id')

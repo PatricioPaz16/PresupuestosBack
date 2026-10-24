@@ -134,6 +134,320 @@ describe('Presupuestos (e2e)', () => {
       .expect(409);
   });
 
+  it('busca por cliente (nombre o teléfono) y trae todos sus autos', async () => {
+    const nombre = `Cliente${sufijo}`;
+    const numero = `${randomInt(1000000, 9999999)}`;
+    const primero = await http
+      .post('/api/vehiculos')
+      .set('Cookie', cookiesA)
+      .send({
+        patente: patenteAleatoria(),
+        marca: 'Ford',
+        modelo: 'Ka',
+        cliente: { nombre, apellido: 'Gómez', telefono: `351 ${numero}` },
+      })
+      .expect(201);
+    const primerVehiculo = primero.body as {
+      id: string;
+      cliente: { id: string };
+    };
+    const segundo = await http
+      .post('/api/vehiculos')
+      .set('Cookie', cookiesA)
+      .send({
+        patente: patenteAleatoria(),
+        marca: 'Fiat',
+        modelo: 'Cronos',
+        clienteId: primerVehiculo.cliente.id,
+      })
+      .expect(201);
+    const segundoVehiculo = segundo.body as { id: string };
+
+    type Respuesta = {
+      vehiculo: unknown;
+      clientes: Array<{ id: string; vehiculos: Array<{ id: string }> }>;
+    };
+    const buscar = async (q: string, cookies = cookiesA) =>
+      (
+        await http
+          .get('/api/vehiculos/buscar')
+          .query({ q })
+          .set('Cookie', cookies)
+          .expect(200)
+      ).body as Respuesta;
+
+    // Por nombre y apellido, sin importar mayúsculas ni acentos.
+    const porNombre = await buscar(`${nombre.toLowerCase()} gomez`);
+    expect(porNombre.vehiculo).toBeNull();
+    const cliente = porNombre.clientes.find(
+      (c) => c.id === primerVehiculo.cliente.id,
+    );
+    expect(cliente?.vehiculos.map((v) => v.id).sort()).toEqual(
+      [primerVehiculo.id, segundoVehiculo.id].sort(),
+    );
+
+    // Por teléfono: una parte de los dígitos o el número completo con 0 y 15.
+    for (const q of [`351${numero}`, `0351 15 ${numero}`]) {
+      const porTelefono = await buscar(q);
+      expect(porTelefono.clientes.map((c) => c.id)).toContain(
+        primerVehiculo.cliente.id,
+      );
+    }
+
+    // Otro taller no ve a este cliente.
+    expect((await buscar(nombre, cookiesB)).clientes).toEqual([]);
+  });
+
+  it('baja y alta de un vehículo: deja de aparecer, no recibe presupuestos y vuelve con su dueño', async () => {
+    const vehiculo = await crearVehiculo(cookiesA);
+    const anterior = await http
+      .post('/api/presupuestos')
+      .set('Cookie', cookiesA)
+      .send({ vehiculoId: vehiculo.id, items: [] })
+      .expect(201);
+
+    const baja = await http
+      .post(`/api/vehiculos/${vehiculo.id}/baja`)
+      .set('Cookie', cookiesA)
+      .expect(200);
+    expect(baja.body.archivadoEn).not.toBeNull();
+
+    // La patente exacta se sigue encontrando (para ofrecer el alta), marcada como baja;
+    // en la lista de autos del cliente ya no aparece.
+    const porPatente = await http
+      .get('/api/vehiculos/buscar')
+      .query({ q: vehiculo.patente })
+      .set('Cookie', cookiesA)
+      .expect(200);
+    expect(porPatente.body.vehiculo.id).toBe(vehiculo.id);
+    expect(porPatente.body.vehiculo.archivadoEn).not.toBeNull();
+    const ficha = await http
+      .get(`/api/clientes/${vehiculo.cliente.id}/ficha`)
+      .set('Cookie', cookiesA)
+      .expect(200);
+    const enFicha = (
+      ficha.body.vehiculos as Array<{ id: string; archivadoEn: string | null }>
+    ).find((v) => v.id === vehiculo.id);
+    expect(enFicha?.archivadoEn).not.toBeNull();
+    expect(
+      (ficha.body.presupuestos as Array<{ id: string }>).map((p) => p.id),
+    ).toContain(anterior.body.id);
+
+    const rechazado = await http
+      .post('/api/presupuestos')
+      .set('Cookie', cookiesA)
+      .send({ vehiculoId: vehiculo.id, items: [] })
+      .expect(400);
+    expect(rechazado.body.message).toContain('dado de baja');
+
+    // Otro taller no puede tocarlo.
+    await http
+      .post(`/api/vehiculos/${vehiculo.id}/alta`)
+      .set('Cookie', cookiesB)
+      .expect(404);
+
+    const alta = await http
+      .post(`/api/vehiculos/${vehiculo.id}/alta`)
+      .set('Cookie', cookiesA)
+      .expect(200);
+    expect(alta.body.archivadoEn).toBeNull();
+    expect(alta.body.cliente.id).toBe(vehiculo.cliente.id);
+    await http
+      .post('/api/presupuestos')
+      .set('Cookie', cookiesA)
+      .send({ vehiculoId: vehiculo.id, items: [] })
+      .expect(201);
+  });
+
+  it('cambio de dueño: a un cliente existente o nuevo; los presupuestos viejos quedan con el anterior', async () => {
+    const vehiculo = await crearVehiculo(cookiesA);
+    const anterior = await http
+      .post('/api/presupuestos')
+      .set('Cookie', cookiesA)
+      .send({ vehiculoId: vehiculo.id, items: [] })
+      .expect(201);
+    const comprador = await http
+      .post('/api/clientes')
+      .set('Cookie', cookiesA)
+      .send({ nombre: 'Comprador', apellido: `Uno ${sufijo}` })
+      .expect(201);
+
+    const aExistente = await http
+      .patch(`/api/vehiculos/${vehiculo.id}/duenio`)
+      .set('Cookie', cookiesA)
+      .send({ clienteId: comprador.body.id })
+      .expect(200);
+    expect(aExistente.body.cliente.id).toBe(comprador.body.id);
+
+    const viejo = await http
+      .get(`/api/presupuestos/${anterior.body.id}`)
+      .set('Cookie', cookiesA)
+      .expect(200);
+    expect(viejo.body.cliente.id).toBe(vehiculo.cliente.id);
+
+    const fichaAnterior = await http
+      .get(`/api/clientes/${vehiculo.cliente.id}/ficha`)
+      .set('Cookie', cookiesA)
+      .expect(200);
+    expect(
+      (fichaAnterior.body.vehiculos as Array<{ id: string }>).map((v) => v.id),
+    ).not.toContain(vehiculo.id);
+
+    const aNuevo = await http
+      .patch(`/api/vehiculos/${vehiculo.id}/duenio`)
+      .set('Cookie', cookiesA)
+      .send({ cliente: { nombre: 'Comprador', apellido: `Dos ${sufijo}` } })
+      .expect(200);
+    expect(aNuevo.body.cliente.apellido).toBe(`Dos ${sufijo}`);
+    expect(aNuevo.body.cliente.id).not.toBe(comprador.body.id);
+
+    await http
+      .patch(`/api/vehiculos/${vehiculo.id}/duenio`)
+      .set('Cookie', cookiesA)
+      .send({})
+      .expect(400);
+    // Otro taller: ni el vehículo ni el cliente de A existen para él.
+    await http
+      .patch(`/api/vehiculos/${vehiculo.id}/duenio`)
+      .set('Cookie', cookiesB)
+      .send({ clienteId: comprador.body.id })
+      .expect(404);
+    const deB = await crearVehiculo(cookiesB);
+    await http
+      .patch(`/api/vehiculos/${deB.id}/duenio`)
+      .set('Cookie', cookiesB)
+      .send({ clienteId: comprador.body.id })
+      .expect(404);
+  });
+
+  it('clientes: listado por nombre, teléfono o patente; baja y alta junto con sus vehículos', async () => {
+    const apellido = `Listado${sufijo}`;
+    const numero = `${randomInt(1000000, 9999999)}`;
+    const primero = await http
+      .post('/api/vehiculos')
+      .set('Cookie', cookiesA)
+      .send({
+        patente: patenteAleatoria(),
+        marca: 'Renault',
+        modelo: 'Clio',
+        cliente: { nombre: 'Ana', apellido, telefono: `261 ${numero}` },
+      })
+      .expect(201);
+    const clienteId = (primero.body as { cliente: { id: string } }).cliente.id;
+    const segundo = await http
+      .post('/api/vehiculos')
+      .set('Cookie', cookiesA)
+      .send({
+        patente: patenteAleatoria(),
+        marca: 'Peugeot',
+        modelo: '208',
+        clienteId,
+      })
+      .expect(201);
+    // El segundo ya estaba dado de baja antes que el cliente.
+    await http
+      .post(`/api/vehiculos/${segundo.body.id}/baja`)
+      .set('Cookie', cookiesA)
+      .expect(200);
+
+    type Fila = {
+      id: string;
+      vehiculos: Array<{ id: string }>;
+      vehiculosDeBaja: number;
+    };
+    const listado = async (query: Record<string, string>, cookies = cookiesA) =>
+      (
+        await http
+          .get('/api/clientes/listado')
+          .query(query)
+          .set('Cookie', cookies)
+          .expect(200)
+      ).body as { items: Fila[]; total: number };
+
+    for (const q of [
+      `ana ${apellido.toLowerCase()}`,
+      `261${numero}`,
+      primero.body.patente as string,
+    ]) {
+      const fila = (await listado({ q })).items.find((c) => c.id === clienteId);
+      expect(fila?.vehiculos.map((v) => v.id)).toEqual([primero.body.id]);
+      expect(fila?.vehiculosDeBaja).toBe(1);
+    }
+
+    // Desplegable sin texto: los últimos cargados, con sus patentes.
+    const recientes = (
+      await http.get('/api/clientes').set('Cookie', cookiesA).expect(200)
+    ).body as Array<{ id: string; patentes: string[] }>;
+    expect(recientes.find((c) => c.id === clienteId)?.patentes).toEqual([
+      primero.body.patente,
+    ]);
+
+    const baja = await http
+      .post(`/api/clientes/${clienteId}/baja`)
+      .set('Cookie', cookiesA)
+      .expect(200);
+    expect(baja.body.cliente.archivadoEn).not.toBeNull();
+    expect(
+      (baja.body.vehiculos as Array<{ archivadoEn: string | null }>).every(
+        (v) => v.archivadoEn !== null,
+      ),
+    ).toBe(true);
+    expect((await listado({ q: apellido })).items).toEqual([]);
+    expect(
+      (await listado({ q: apellido, archivados: 'true' })).items.map(
+        (c) => c.id,
+      ),
+    ).toEqual([clienteId]);
+    const enDesplegable = await http
+      .get('/api/clientes')
+      .query({ q: apellido })
+      .set('Cookie', cookiesA)
+      .expect(200);
+    expect(enDesplegable.body).toEqual([]);
+
+    // El alta devuelve al cliente con el vehículo que se fue con él, no el de antes.
+    const alta = await http
+      .post(`/api/clientes/${clienteId}/alta`)
+      .set('Cookie', cookiesA)
+      .expect(200);
+    expect(alta.body.cliente.archivadoEn).toBeNull();
+    const estados = Object.fromEntries(
+      (
+        alta.body.vehiculos as Array<{ id: string; archivadoEn: string | null }>
+      ).map((v) => [v.id, v.archivadoEn === null]),
+    );
+    expect(estados).toEqual({
+      [primero.body.id]: true,
+      [segundo.body.id]: false,
+    });
+
+    expect((await listado({ q: apellido }, cookiesB)).items).toEqual([]);
+    await http
+      .get(`/api/clientes/${clienteId}/ficha`)
+      .set('Cookie', cookiesB)
+      .expect(404);
+  });
+
+  it('buscar sin texto trae los últimos vehículos atendidos', async () => {
+    const viejo = await crearVehiculo(cookiesA);
+    const nuevo = await crearVehiculo(cookiesA);
+    const recientes = async () =>
+      (
+        await http
+          .get('/api/vehiculos/buscar')
+          .set('Cookie', cookiesA)
+          .expect(200)
+      ).body.recientes as Array<{ id: string }>;
+
+    expect((await recientes())[0].id).toBe(nuevo.id);
+    await http
+      .post('/api/presupuestos')
+      .set('Cookie', cookiesA)
+      .send({ vehiculoId: viejo.id, items: [] })
+      .expect(201);
+    expect((await recientes())[0].id).toBe(viejo.id);
+  });
+
   it('calcula subtotales y total en la base, con ítems de catálogo y libres', async () => {
     const vehiculo = await crearVehiculo(cookiesA);
     const catalogo = await http

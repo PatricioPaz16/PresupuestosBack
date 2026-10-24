@@ -41,6 +41,8 @@ export interface VehiculoDetalleDto {
   combustible: Combustible | null;
   vin: string | null;
   notas: string | null;
+  /** Fecha en que se dio de baja; null si está activo. */
+  archivadoEn: string | null;
   cliente: ClienteDto;
   historial: HistorialItemDto[];
   ultimoKilometraje: number | null;
@@ -55,14 +57,32 @@ export interface VehiculoResumenDto {
   clienteNombre: string;
 }
 
+export interface VehiculoDeClienteDto {
+  id: string;
+  patente: string;
+  marca: string;
+  modelo: string;
+  anio: number | null;
+}
+
+/** Cliente que coincide con la búsqueda, con sus autos (el último atendido primero). */
+export interface ClienteConVehiculosDto extends ClienteDto {
+  vehiculos: VehiculoDeClienteDto[];
+}
+
 export interface BuscarPatenteResponseDto {
-  /** Patente normalizada (AB123CD). */
+  /** Lo escrito, normalizado como patente (AB123CD). */
   patente: string;
   formato: FormatoPatente;
   valida: boolean;
+  /** Vehículo con esa patente exacta, con dueño e historial (puede estar dado de baja). */
   vehiculo: VehiculoDetalleDto | null;
-  /** Coincidencias parciales (si se escribió parte de la patente). */
+  /** Coincidencias parciales de patente (si se escribió parte). */
   coincidencias: VehiculoResumenDto[];
+  /** Clientes que coinciden por nombre, empresa, teléfono o documento, con sus autos. */
+  clientes: ClienteConVehiculosDto[];
+  /** Sin texto: los últimos vehículos atendidos o cargados (para elegir de la lista). */
+  recientes: VehiculoResumenDto[];
 }
 
 export class VehiculoInputDto {
@@ -132,6 +152,20 @@ export class CrearVehiculoDto extends VehiculoInputDto {
   cliente?: ClienteInputDto;
 }
 
+/** Nuevo dueño: un cliente existente (clienteId) o los datos de uno nuevo (cliente). */
+export class CambiarDuenioDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID('all', { message: 'clienteId inválido.' })
+  clienteId?: string;
+
+  @ApiPropertyOptional({ type: ClienteInputDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ClienteInputDto)
+  cliente?: ClienteInputDto;
+}
+
 export class ActualizarVehiculoDto extends PartialType(VehiculoInputDto) {
   @ApiPropertyOptional({ description: 'Cambio de dueño' })
   @IsOptional()
@@ -140,8 +174,20 @@ export class ActualizarVehiculoDto extends PartialType(VehiculoInputDto) {
 }
 
 export class BuscarPatenteQuery {
-  @ApiProperty({ example: 'AB123CD' })
+  @ApiPropertyOptional({
+    example: 'AB123CD',
+    description: 'Patente, nombre o empresa del cliente, teléfono o documento',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 80)
+  q?: string;
+
+  @ApiPropertyOptional({
+    description: 'Igual que q (se mantiene por compatibilidad)',
+  })
+  @IsOptional()
   @IsString()
   @Length(1, 16)
-  patente: string;
+  patente?: string;
 }
