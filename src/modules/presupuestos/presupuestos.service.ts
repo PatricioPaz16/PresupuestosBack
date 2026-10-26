@@ -368,8 +368,13 @@ export class PresupuestosService {
     return this.conAutor(tallerId, detalle);
   }
 
+  /**
+   * Al aprobar, la base descuenta del stock los repuestos del catálogo que llevan stock
+   * (trigger). app.usuario_id deja anotado quién lo aprobó en esos movimientos.
+   */
   async cambiarEstado(
     tallerId: string,
+    usuarioId: string,
     id: string,
     dto: CambiarEstadoDto,
   ): Promise<PresupuestoDetalleDto> {
@@ -392,6 +397,9 @@ export class PresupuestosService {
             'Agregá al menos un ítem antes de enviarlo o aprobarlo.',
           );
         }
+        await em.query(`SELECT set_config('app.usuario_id', $1, true)`, [
+          usuarioId,
+        ]);
         await em.query(
           `UPDATE presupuestos SET estado = $2::estado_presupuesto, version = version + 1 WHERE id = $1`,
           [id, dto.estado],

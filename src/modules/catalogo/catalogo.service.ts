@@ -1,9 +1,5 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import { EntityManager } from 'typeorm';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { DIAS_PRECIO_VIEJO } from '../../common/constants/dominio.constant';
 import {
   escaparLike,
   filasDe,
@@ -13,20 +9,19 @@ import {
 } from '../../common/database/sql.util';
 import { TenantService } from '../../common/database/tenant.service';
 import {
+  COLUMNAS_CATALOGO,
+  SQL_FALTANTE,
+  leerItemCatalogo,
+} from './catalogo.sql';
+import {
   ActualizarCatalogoItemDto,
   AjustePreciosDto,
   BuscarCatalogoQuery,
   CatalogoItemDto,
   CatalogoItemInputDto,
+  CrearCatalogoItemDto,
   PaginaCatalogoDto,
 } from './dto/catalogo.dto';
-
-const COLUMNAS = `
-  ci.id, ci.tipo, ci.nombre, ci.marca, ci.codigo, ci.unidad,
-  ci.precio_referencia::text AS "precioReferencia",
-  ci.costo_referencia::text AS "costoReferencia",
-  ci.precio_actualizado_en AS "precioActualizadoEn",
-  ci.veces_usado AS "vecesUsado", ci.activo`;
 
 @Injectable()
 export class CatalogoService {
@@ -51,9 +46,24 @@ export class CatalogoService {
         valores.push(query.tipo);
         condiciones.push(`ci.tipo = $${valores.length}`);
       }
+      if (query.stock === 'controlado') {
+        condiciones.push('ci.controla_stock');
+      } else if (query.stock === 'faltante') {
+        condiciones.push(SQL_FALTANTE);
+      } else if (query.stock === 'sin_control') {
+        condiciones.push(`ci.tipo = 'repuesto' AND NOT ci.controla_stock`);
+      }
+      if (query.precioViejo) {
+        condiciones.push(
+          `ci.precio_actualizado_en < now() - interval '${DIAS_PRECIO_VIEJO} days'`,
+        );
+      }
 
       const patrones = query.q ? patronesPorPalabra(query.q) : [];
-      let orden = 'ci.veces_usado DESC, ci.nombre';
+      // El listado de stock va por nombre; el autocompletado, por lo más usado.
+      let orden = query.stock
+        ? 'lower(ci.nombre), lower(ci.marca)'
+        : 'ci.veces_usado DESC, ci.nombre';
       if (patrones.length > 0) {
         valores.push(patrones);
         condiciones.push(`ci.busqueda LIKE ALL ($${valores.length}::text[])`);
@@ -65,7 +75,7 @@ export class CatalogoService {
       const filas = await em.query<
         Array<CatalogoItemDto & { totalFilas: number }>
       >(
-        `SELECT ${COLUMNAS}, count(*) OVER ()::int AS "totalFilas"
+        `SELECT ${COLUMNAS_CATALOGO}, count(*) OVER ()::int AS "totalFilas"
            FROM catalogo_items ci
           ${condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : ''}
           ORDER BY ${orden}
@@ -80,12 +90,22 @@ export class CatalogoService {
     });
   }
 
-  crear(tallerId: string, dto: CatalogoItemInputDto): Promise<CatalogoItemDto> {
+  crear(
+    tallerId: string,
+    usuarioId: string,
+    dto: CrearCatalogoItemDto,
+  ): Promise<CatalogoItemDto> {
     return this.tenant.run(tallerId, async (em) => {
-      const datos = this.normalizar(dto);
+      const stockInicial = vacioANull(dto.stockInicial);
+      const datos = this.normalizar({
+        ...dto,
+        controlaStock: dto.controlaStock || stockInicial !== null,
+      });
       const [fila] = await em.query<Array<{ id: string }>>(
-        `INSERT INTO catalogo_items (tipo, nombre, marca, codigo, unidad, precio_referencia, costo_referencia)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        `INSERT INTO catalogo_items
+                (tipo, nombre, marca, codigo, unidad, precio_referencia, costo_referencia,
+                 controla_stock, stock_minimo, ubicacion)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
         [
           datos.tipo,
           datos.nombre,
@@ -94,27 +114,52 @@ export class CatalogoService {
           datos.unidad,
           datos.precioReferencia,
           datos.costoReferencia,
+          datos.controlaStock,
+          datos.stockMinimo,
+          datos.ubicacion,
         ],
       );
-      return this.leer(em, fila.id);
+      if (stockInicial !== null && Number(stockInicial) !== 0) {
+        await em.query(
+          `INSERT INTO stock_movimientos (catalogo_item_id, tipo, cantidad, nota, usuario_id)
+           VALUES ($1, 'ajuste', $2, 'Stock inicial', $3)`,
+          [fila.id, stockInicial, usuarioId],
+        );
+      }
+      return leerItemCatalogo(em, fila.id);
     });
   }
 
   actualizar(
     tallerId: string,
+    usuarioId: string,
     id: string,
     dto: ActualizarCatalogoItemDto,
   ): Promise<CatalogoItemDto> {
     return this.tenant.run(tallerId, async (em) => {
-      const actual = await this.leer(em, id);
+      const actual = await leerItemCatalogo(em, id, { bloquear: true });
       const datos = this.normalizar({
         ...actual,
         ...dto,
       });
+      // Dejar de llevar stock: lo que hubiera se lleva a cero (queda en el historial).
+      if (
+        actual.controlaStock &&
+        !datos.controlaStock &&
+        Number(actual.stock) !== 0
+      ) {
+        await em.query(
+          `INSERT INTO stock_movimientos (catalogo_item_id, tipo, cantidad, nota, usuario_id)
+           SELECT id, 'ajuste', -stock, 'Dejó de llevar stock', $2
+             FROM catalogo_items WHERE id = $1`,
+          [id, usuarioId],
+        );
+      }
       await em.query(
         `UPDATE catalogo_items
             SET tipo = $2, nombre = $3, marca = $4, codigo = $5, unidad = $6,
-                precio_referencia = $7, costo_referencia = $8, activo = $9
+                precio_referencia = $7, costo_referencia = $8, activo = $9,
+                controla_stock = $10, stock_minimo = $11, ubicacion = $12
           WHERE id = $1`,
         [
           id,
@@ -126,9 +171,12 @@ export class CatalogoService {
           datos.precioReferencia,
           datos.costoReferencia,
           dto.activo ?? actual.activo,
+          datos.controlaStock,
+          datos.stockMinimo,
+          datos.ubicacion,
         ],
       );
-      return this.leer(em, id);
+      return leerItemCatalogo(em, id);
     });
   }
 
@@ -162,21 +210,14 @@ export class CatalogoService {
     });
   }
 
-  private async leer(em: EntityManager, id: string): Promise<CatalogoItemDto> {
-    const [item] = await em.query<CatalogoItemDto[]>(
-      `SELECT ${COLUMNAS} FROM catalogo_items ci WHERE ci.id = $1`,
-      [id],
-    );
-    if (!item) {
-      throw new NotFoundException('Ítem de catálogo no encontrado.');
-    }
-    return item;
-  }
-
   private normalizar(dto: CatalogoItemInputDto) {
     const nombre = dto.nombre?.trim();
     if (!nombre) {
       throw new BadRequestException('El nombre es obligatorio.');
+    }
+    const controlaStock = dto.controlaStock ?? false;
+    if (controlaStock && dto.tipo !== 'repuesto') {
+      throw new BadRequestException('Solo los repuestos llevan stock.');
     }
     return {
       tipo: dto.tipo,
@@ -186,6 +227,9 @@ export class CatalogoService {
       unidad: dto.unidad ?? 'u',
       precioReferencia: dto.precioReferencia,
       costoReferencia: vacioANull(dto.costoReferencia),
+      controlaStock,
+      stockMinimo: vacioANull(dto.stockMinimo),
+      ubicacion: vacioANull(dto.ubicacion),
     };
   }
 }

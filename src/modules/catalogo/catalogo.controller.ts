@@ -14,16 +14,18 @@ import {
   ACCESS_TOKEN_COOKIE,
   RoleName,
 } from '../../common/constants/roles.enum';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TallerId } from '../../common/decorators/taller-id.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { User } from '../users/entities/user.entity';
 import { CatalogoService } from './catalogo.service';
 import {
   ActualizarCatalogoItemDto,
   AjustePreciosDto,
   BuscarCatalogoQuery,
   CatalogoItemDto,
-  CatalogoItemInputDto,
+  CrearCatalogoItemDto,
   PaginaCatalogoDto,
 } from './dto/catalogo.dto';
 
@@ -46,21 +48,27 @@ export class CatalogoController {
   }
 
   @Post()
+  @ApiOperation({
+    summary:
+      'Agregar un repuesto o trabajo (con stock inicial, si es un repuesto)',
+  })
   crear(
     @TallerId() tallerId: string,
-    @Body() dto: CatalogoItemInputDto,
+    @CurrentUser() usuario: User,
+    @Body() dto: CrearCatalogoItemDto,
   ): Promise<CatalogoItemDto> {
-    return this.catalogo.crear(tallerId, dto);
+    return this.catalogo.crear(tallerId, usuario.id, dto);
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Editar o activar/desactivar un ítem del catálogo' })
   actualizar(
     @TallerId() tallerId: string,
+    @CurrentUser() usuario: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ActualizarCatalogoItemDto,
   ): Promise<CatalogoItemDto> {
-    return this.catalogo.actualizar(tallerId, id, dto);
+    return this.catalogo.actualizar(tallerId, usuario.id, id, dto);
   }
 
   @Post('ajuste-precios')

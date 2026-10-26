@@ -55,3 +55,24 @@ export const ESTADOS_EDITABLES: readonly EstadoPresupuesto[] = [
 export const REGEX_IMPORTE = /^\d{1,9}(\.\d{1,2})?$/;
 /** Cantidades: hasta 9.999,999 ("4.5", "0.250"). */
 export const REGEX_CANTIDAD = /^\d{1,4}(\.\d{1,3})?$/;
+/** Stock: hasta 999.999,999 ("12", "4.5"). */
+export const REGEX_STOCK = /^\d{1,6}(\.\d{1,3})?$/;
+
+export const TIPOS_MOVIMIENTO_STOCK = [
+  'ingreso',
+  'ajuste',
+  'presupuesto',
+] as const;
+export type TipoMovimientoStock = (typeof TIPOS_MOVIMIENTO_STOCK)[number];
+
+/** Filtros del listado de stock (todos ordenan por nombre). */
+export const FILTROS_STOCK = [
+  'controlado',
+  'faltante',
+  'sin_control',
+  'todos',
+] as const;
+export type FiltroStock = (typeof FILTROS_STOCK)[number];
+
+/** Días a partir de los cuales un precio de referencia se considera viejo. */
+export const DIAS_PRECIO_VIEJO = 45;

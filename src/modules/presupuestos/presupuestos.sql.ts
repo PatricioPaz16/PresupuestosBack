@@ -74,9 +74,17 @@ export const SQL_DETALLE = `
                        'id', i.id, 'tipo', i.tipo, 'catalogoItemId', i.catalogo_item_id,
                        'descripcion', i.descripcion, 'proveedor', i.proveedor, 'unidad', i.unidad,
                        'cantidad', i.cantidad::text, 'precioCosto', i.precio_costo::text,
-                       'precioUnitario', i.precio_unitario::text, 'subtotal', i.subtotal::text)
+                       'precioUnitario', i.precio_unitario::text, 'subtotal', i.subtotal::text,
+                       'stock', (SELECT json_build_object('actual', ci.stock::text, 'unidad', ci.unidad)
+                                   FROM catalogo_items ci
+                                  WHERE ci.id = i.catalogo_item_id AND ci.controla_stock))
                      ORDER BY i.posicion)
                 FROM presupuesto_items i WHERE i.presupuesto_id = p.id), '[]'::json),
+           'stockDescontado', (SELECT count(*)::int FROM (
+                                 SELECT 1 FROM stock_movimientos m
+                                  WHERE m.presupuesto_id = p.id
+                                  GROUP BY m.catalogo_item_id
+                                 HAVING sum(m.cantidad) < 0) d),
            'enlace', (SELECT json_build_object(
                          'vistoEn', e.visto_en, 'ultimaVistaEn', e.ultima_vista_en,
                          'vistas', e.vistas)

@@ -114,7 +114,8 @@ talleres ─┬─< users
           ├─< numeradores            (último número usado por taller)
           ├─< clientes ─┬─< vehiculos
           │             └──────────────┐
-          ├─< catalogo_items           │
+          ├─< catalogo_items ──< stock_movimientos >── presupuestos (los que descontó)
+          │                            │                 >── users (quién lo cargó)
           └─< presupuestos >───────────┘ (cliente_id: a quién se le cotizó)
                  │   >── vehiculos
                  │   >── users (creado_por)
@@ -190,6 +191,24 @@ Repuestos y trabajos frecuentes en **una** tabla (`tipo`).
 | precio_actualizado_en | timestamptz | El front avisa si el precio tiene más de 45 días |
 | veces_usado, ultimo_uso_en | | Ordenan las sugerencias del autocompletado |
 | activo | boolean | Lo usado en presupuestos no se borra: se desactiva |
+| controla_stock | boolean | Solo repuestos. Se activa solo al cargarle el primer movimiento |
+| stock | numeric(12,3) | Lo mantiene la base con los movimientos (no se escribe a mano). Puede ser negativo |
+| stock_minimo | numeric(12,3) | En el mínimo o debajo figura como faltante (sin mínimo: en cero o menos) |
+| ubicacion | text | Estante, cajón… |
+
+### stock_movimientos
+
+Historial de stock de cada repuesto. No se edita ni se borra (el rol de negocio solo tiene
+SELECT e INSERT).
+
+| Campo | Tipo | Notas |
+|-------|------|-------|
+| tipo | text | `ingreso` (compra, +), `ajuste` (conteo o stock inicial, ±), `presupuesto` (aprobado, −; devolución, +) |
+| cantidad | numeric(12,3) | Con signo |
+| stock_resultante | numeric(12,3) | Cómo quedó el stock después (lo completa el trigger) |
+| costo_unitario, proveedor, comprobante | | Ingresos: de dónde vino y a cuánto |
+| presupuesto_id | uuid | El presupuesto aprobado que lo descontó |
+| nota, usuario_id, created_at | | Quién y cuándo |
 
 ### presupuestos
 
@@ -250,8 +269,9 @@ Repuestos y trabajos frecuentes en **una** tabla (`tipo`).
 | — | `posicion`, `unidad`, `proveedor` | Orden estable, litros/juegos/horas, dónde se cotizó |
 | `subtotal` | columna generada | No puede quedar desincronizado |
 
-Quedó afuera a propósito: **stock** (el taller no lo maneja así), **facturación** (el
-documento lleva la leyenda "no válido como factura"), y precios en dólares.
+En la primera versión quedaron afuera el **stock** (se agregó después, opcional por
+repuesto: sección 10), la **facturación** (el documento lleva la leyenda "no válido como
+factura") y los precios en dólares.
 
 ---
 
@@ -313,6 +333,7 @@ uno ya usado).
 - **Vencido** no es un estado: es un enviado cuya fecha de validez ya pasó (se calcula al
   mostrar).
 - Duplicar copia ítems y textos, toma la fecha de hoy y el dueño **actual** del vehículo.
+- **Aprobar descuenta stock** (sección 10).
 
 ---
 
@@ -364,7 +385,39 @@ impresión o el mensaje de WhatsApp los muestren por error.
 
 ---
 
-## 10. Sesión y permisos
+## 10. Stock
+
+Pensado para lo que el taller tiene en el estante; lo que se compra para un trabajo puntual
+se sigue cotizando libre ("modo repuestera") y no toca el stock.
+
+- **Solo movimientos.** El stock de un repuesto cambia únicamente con un movimiento: un
+  trigger (`trg_stock_movimientos_aplicar`) lo suma y anota `stock_resultante`. Un UPDATE
+  directo de `catalogo_items.stock` o un alta con stock distinto de cero fallan
+  (`CHK_catalogo_items_stock_movimientos`). Así la suma del historial siempre coincide con
+  el stock.
+- **Ingreso de mercadería** (`POST /catalogo/:id/stock/ingresos`): suma la cantidad, guarda
+  costo, proveedor y comprobante, y actualiza costo y precio de venta del catálogo (el front
+  sugiere el precio con el mismo margen que tenía, o con el recargo del taller).
+- **Conteo** (`POST /catalogo/:id/stock/ajustes`): se informa lo que hay y se registra la
+  diferencia. En un repuesto que no llevaba stock, es el stock inicial.
+- **Aprobar un presupuesto** (trigger `TRG_presupuestos_30_stock`): descuenta, sumando
+  filas repetidas, los repuestos del catálogo que llevan stock y tienen la misma unidad que
+  el catálogo (si se cotizó "1,5 l" de un repuesto que se lleva por unidad, no hay forma de
+  saber cuánto descontar). Lo hace la base: no se puede aprobar sin descontar. El
+  movimiento anota quién aprobó (`app.usuario_id`, que fija la API en la transacción). Si
+  alguna vez se anulara una aprobación, el mismo trigger devuelve exactamente lo
+  descontado.
+- **Sin stock suficiente** se aprueba igual: el stock queda negativo y la pantalla lo marca
+  ("Revisar"). Antes de aprobar, el front muestra qué se descuenta y qué no alcanza.
+- **Dejar de llevar stock**: lo que hubiera se lleva a cero con un ajuste (queda en el
+  historial) y los presupuestos dejan de descontarlo.
+- **Resumen** (`GET /catalogo/stock/resumen`): repuestos con stock, faltantes, negativos,
+  valor al costo y a precio de venta (stock positivo × precios del catálogo), sin costo
+  cargado y precios de 45 días o más.
+
+---
+
+## 11. Sesión y permisos
 
 - JWT de acceso (15 min) en cookie HttpOnly, refresh token (7 días) rotado y guardado como
   hash. El JWT lleva `sid` (la sesión): en cada pedido se verifica que la sesión siga
@@ -376,7 +429,7 @@ impresión o el mensaje de WhatsApp los muestren por error.
 
 ---
 
-## 11. Decisiones
+## 12. Decisiones
 
 | Decisión | Alternativa descartada | Motivo |
 |----------|------------------------|--------|
@@ -392,10 +445,13 @@ impresión o el mensaje de WhatsApp los muestren por error.
 | Baja lógica (`archivado_en`) de clientes y vehículos | Borrar | Los presupuestos los referencian; la patente queda reservada y se puede revertir |
 | PDF en el servidor con pdfmake | Chromium sin pantalla (Puppeteer) | Mismo diseño sin cargar un navegador entero en un servidor de 512 MB |
 | Taller dentro del token del enlace público | Función que saltee RLS para buscar el token | El enlace se resuelve con el mismo aislamiento que el resto de la API |
+| Stock solo por movimientos (trigger) | Editar la cantidad a mano | El historial explica cada cambio y la suma siempre cierra |
+| Descontar al aprobar | Descontar al facturar o al entregar | Es lo acordado con el taller; la facturación todavía no existe |
+| Permitir stock negativo | Bloquear la aprobación | El taller aprueba aunque no haya cargado la compra; se corrige con un ingreso o un conteo |
 
 ---
 
-## 12. Para una versión siguiente
+## 13. Para una versión siguiente
 
 - Panel web del dueño de la plataforma para crear y suspender talleres.
 - Facturación electrónica con ARCA (presupuesto aprobado → factura con CAE y QR).
@@ -404,6 +460,9 @@ impresión o el mensaje de WhatsApp los muestren por error.
 - Envío por email con el PDF adjunto (hoy: link y PDF por WhatsApp).
 - Fotos del vehículo o del daño adjuntas al presupuesto.
 - Paquetes de ítems ("Service 10.000 km") que se agregan de una.
-- Historial de precios por repuesto y por proveedor.
+- Venta de mostrador (repuestera): vender repuestos sin presupuesto ni vehículo,
+  descontando stock.
+- Importar la lista de repuestos o de precios de un proveedor desde Excel.
+- Historial de precios por proveedor (hoy cada ingreso guarda el costo de esa compra).
 - Usuarios en más de un taller (membresías).
 - Reportes: aprobados vs. rechazados, ganancia por período.

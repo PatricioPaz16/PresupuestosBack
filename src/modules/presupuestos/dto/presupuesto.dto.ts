@@ -258,6 +258,8 @@ export interface PresupuestoItemDetalleDto {
   precioCosto: string | null;
   precioUnitario: string;
   subtotal: string;
+  /** Repuesto del catálogo que lleva stock: cuánto hay ahora. null si no lleva stock. */
+  stock: { actual: string; unidad: Unidad } | null;
 }
 
 export interface VehiculoEnPresupuestoDto {
@@ -301,6 +303,8 @@ export interface PresupuestoDetalleDto {
   items: PresupuestoItemDetalleDto[];
   /** Enlace público: cuándo lo abrió el cliente. null si todavía no se generó. */
   enlace: Omit<EnlacePublicoDto, 'token'> | null;
+  /** Repuestos que se descontaron del stock al aprobarlo. */
+  stockDescontado: number;
 }
 
 export interface EnlacePublicoDto {

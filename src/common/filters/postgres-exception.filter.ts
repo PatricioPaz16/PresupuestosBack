@@ -90,6 +90,31 @@ const POR_RESTRICCION: Record<string, Traduccion> = {
     status: HttpStatus.BAD_REQUEST,
     message: 'El logo debe ser PNG, JPG o WEBP de hasta 300 KB.',
   },
+  CHK_catalogo_items_stock_tipo: {
+    status: HttpStatus.BAD_REQUEST,
+    message: 'Solo los repuestos llevan stock.',
+  },
+  CHK_catalogo_items_stock: {
+    status: HttpStatus.BAD_REQUEST,
+    message: 'El stock quedaría fuera de rango (hasta 999.999).',
+  },
+  CHK_catalogo_items_stock_movimientos: {
+    status: HttpStatus.CONFLICT,
+    message:
+      'El stock cambia solo con movimientos: ingreso, conteo o presupuesto aprobado.',
+  },
+  CHK_stock_movimientos_ingreso: {
+    status: HttpStatus.BAD_REQUEST,
+    message: 'La cantidad del ingreso tiene que ser mayor que cero.',
+  },
+  FK_stock_movimientos_item: {
+    status: HttpStatus.NOT_FOUND,
+    message: 'El repuesto no existe en el catálogo.',
+  },
+  FK_stock_movimientos_presupuesto: {
+    status: HttpStatus.CONFLICT,
+    message: 'El presupuesto movió stock y no se puede borrar.',
+  },
 };
 
 /** Traduce errores de PostgreSQL a respuestas HTTP con mensajes para el usuario. */

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsIn,
@@ -13,8 +13,12 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { QueryBooleano } from '../../../common/decorators/query-booleano.decorator';
 import {
+  FILTROS_STOCK,
+  type FiltroStock,
   REGEX_IMPORTE,
+  REGEX_STOCK,
   TIPOS_ITEM,
   type TipoItem,
   UNIDADES,
@@ -23,6 +27,8 @@ import {
 
 const MENSAJE_IMPORTE =
   'Importe inválido: usá punto decimal y hasta 2 decimales (ej: 12500.50).';
+export const MENSAJE_STOCK =
+  'Cantidad inválida: hasta 999999 con 3 decimales (ej: 4.5).';
 
 export interface CatalogoItemDto {
   id: string;
@@ -36,6 +42,13 @@ export interface CatalogoItemDto {
   precioActualizadoEn: string;
   vecesUsado: number;
   activo: boolean;
+  /** Repuestos: si lleva stock (se descuenta al aprobar presupuestos). */
+  controlaStock: boolean;
+  /** Cantidad en el taller ("12.000"). Puede ser negativa si se aprobó sin stock. */
+  stock: string;
+  /** Debajo de esto (o en esto) figura como faltante. */
+  stockMinimo: string | null;
+  ubicacion: string | null;
 }
 
 export interface PaginaCatalogoDto {
@@ -80,6 +93,37 @@ export class CatalogoItemInputDto {
   @IsOptional()
   @Matches(REGEX_IMPORTE, { message: MENSAJE_IMPORTE })
   costoReferencia?: string | null;
+
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'Solo repuestos. Al apagarlo, el stock que hubiera se lleva a cero con un ajuste.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  controlaStock?: boolean;
+
+  @ApiPropertyOptional({ example: '2' })
+  @IsOptional()
+  @Matches(REGEX_STOCK, { message: MENSAJE_STOCK })
+  stockMinimo?: string | null;
+
+  @ApiPropertyOptional({ example: 'Estante B3' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60, { message: 'La ubicación admite hasta 60 caracteres.' })
+  ubicacion?: string | null;
+}
+
+export class CrearCatalogoItemDto extends CatalogoItemInputDto {
+  @ApiPropertyOptional({
+    example: '5',
+    description:
+      'Repuestos: stock actual al darlo de alta. Si viene, activa el control de stock.',
+  })
+  @IsOptional()
+  @Matches(REGEX_STOCK, { message: MENSAJE_STOCK })
+  stockInicial?: string | null;
 }
 
 export class ActualizarCatalogoItemDto extends PartialType(
@@ -105,9 +149,29 @@ export class BuscarCatalogoQuery {
 
   @ApiPropertyOptional({ default: false })
   @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true')
+  @QueryBooleano()
   @IsBoolean()
   incluirInactivos?: boolean;
+
+  @ApiPropertyOptional({
+    enum: FILTROS_STOCK,
+    description:
+      'controlado: los que llevan stock · faltante: en o debajo del mínimo (o sin stock) · ' +
+      'sin_control: repuestos que todavía no llevan stock · todos: sin filtrar. ' +
+      'Con cualquiera de estos, ordena por nombre.',
+  })
+  @IsOptional()
+  @IsIn(FILTROS_STOCK)
+  stock?: FiltroStock;
+
+  @ApiPropertyOptional({
+    default: false,
+    description: 'Solo precios de hace 45 días o más',
+  })
+  @IsOptional()
+  @QueryBooleano()
+  @IsBoolean()
+  precioViejo?: boolean;
 
   @ApiPropertyOptional({ default: 20 })
   @IsOptional()

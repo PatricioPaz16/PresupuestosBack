@@ -521,9 +521,14 @@ describe('Presupuestos (e2e)', () => {
         ivaPorcentaje: 0,
         descuentoTipo: 'porcentaje',
         descuentoValor: '10',
-        // Se reenvían los ítems tal como volvieron (con su id), sin el subtotal calculado.
+        // Se reenvían los ítems tal como volvieron (con su id), sin lo que calcula la
+        // base (subtotal y stock del catálogo).
         items: [p.items[0], { ...p.items[1], precioUnitario: '50000' }].map(
-          ({ subtotal: _subtotal, ...item }: Record<string, unknown>) => item,
+          ({
+            subtotal: _subtotal,
+            stock: _stock,
+            ...item
+          }: Record<string, unknown>) => item,
         ),
       })
       .expect(200);

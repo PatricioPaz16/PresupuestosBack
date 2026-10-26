@@ -142,10 +142,11 @@ export class PresupuestosController {
   })
   cambiarEstado(
     @TallerId() tallerId: string,
+    @CurrentUser() usuario: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CambiarEstadoDto,
   ): Promise<PresupuestoDetalleDto> {
-    return this.presupuestos.cambiarEstado(tallerId, id, dto);
+    return this.presupuestos.cambiarEstado(tallerId, usuario.id, id, dto);
   }
 
   @Post(':id/duplicar')

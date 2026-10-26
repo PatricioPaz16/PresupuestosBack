@@ -3,7 +3,8 @@
 API en **NestJS 11 + PostgreSQL** para armar, imprimir y enviar presupuestos de talleres
 mecánicos. Pensada para el caso real del taller: muchos repuestos no están en stock y se
 cotizan en la repuestera en el momento, así que cada ítem se puede cargar desde el catálogo
-o escribir libre, con su costo y precio propios.
+o escribir libre, con su costo y precio propios. Los repuestos que el taller sí tiene pueden
+llevar stock: se carga lo que entra y, al aprobar un presupuesto, se descuenta solo.
 
 Varios talleres comparten la misma instalación. Cada usuario pertenece a un taller y la
 base de datos impide ver o tocar datos de otro (Row Level Security + claves foráneas
@@ -94,7 +95,11 @@ El detalle de cada body/respuesta está en Swagger.
 | GET | `/clientes/:id/ficha` | Sesión | Datos, vehículos (activos y dados de baja) y presupuestos del cliente |
 | POST / PATCH | `/clientes`, `/clientes/:id` | Sesión | Alta y edición de datos |
 | POST | `/clientes/:id/baja`, `/clientes/:id/alta` | Sesión | Baja del cliente y sus vehículos activos / alta de nuevo |
-| GET / POST / PATCH | `/catalogo`, `/catalogo/:id` | Sesión | Repuestos y trabajos frecuentes |
+| GET / POST / PATCH | `/catalogo`, `/catalogo/:id` | Sesión | Repuestos y trabajos frecuentes; filtro `stock` (`controlado`, `faltante`, `sin_control`, `todos`) |
+| GET | `/catalogo/stock/resumen` | Sesión | Faltantes, valor del stock al costo y precios viejos |
+| POST | `/catalogo/:id/stock/ingresos` | Sesión | Ingreso de mercadería: suma stock y actualiza costo y precio |
+| POST | `/catalogo/:id/stock/ajustes` | Sesión | Conteo: fija el stock real y registra la diferencia |
+| GET | `/catalogo/:id/stock/movimientos` | Sesión | Historial de stock del repuesto |
 | POST | `/catalogo/ajuste-precios` | ADMIN | Aumento masivo por porcentaje, con redondeo |
 | GET / POST / PATCH | `/users`, `/users/:id` | ADMIN | Usuarios del propio taller |
 | GET | `/publico/presupuestos/:token` | Público** | Hoja del presupuesto para el cliente (sin datos internos); registra que lo abrió |
@@ -118,6 +123,8 @@ por otra persona, etc.) vuelven como 400/409 con un mensaje en castellano.
   triggers). La API no acepta totales que vengan del navegador.
 - Numeración correlativa propia de cada taller (`00001`, `00002`, …), sin huecos por
   concurrencia.
+- Stock de repuestos mantenido por la base: cambia solo con movimientos (ingreso, conteo o
+  presupuesto aprobado, por trigger) y cada uno queda en el historial.
 - Aislamiento por taller con Row Level Security: cada operación de negocio corre en una
   transacción con `SET LOCAL ROLE presupuestos_app` y `app.taller_id`.
 
@@ -213,7 +220,7 @@ src/
 │   ├── talleres/        # Configuración del taller
 │   ├── clientes/        # Listado, ficha, alta/baja
 │   ├── vehiculos/       # Búsqueda, alta rápida, alta/baja y cambio de dueño
-│   ├── catalogo/        # Repuestos y trabajos frecuentes
+│   ├── catalogo/        # Repuestos y trabajos frecuentes, stock e historial
 │   ├── presupuestos/    # Alta, edición, estados, documento, PDF y enlace público
 │   └── health/
 └── scripts/crear-taller.ts

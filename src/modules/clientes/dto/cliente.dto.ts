@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEmail,
@@ -12,6 +12,7 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
+import { QueryBooleano } from '../../../common/decorators/query-booleano.decorator';
 
 export interface ClienteDto {
   id: string;
@@ -179,7 +180,7 @@ export class ListarClientesQuery {
     description: 'true: solo los dados de baja',
   })
   @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true')
+  @QueryBooleano()
   @IsBoolean()
   archivados?: boolean;
 
