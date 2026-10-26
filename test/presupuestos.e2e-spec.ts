@@ -544,6 +544,127 @@ describe('Presupuestos (e2e)', () => {
     expect(conflicto.body.code).toBe('VERSION_CONFLICTO');
   });
 
+  it('enlace público: el cliente ve la hoja y el PDF sin datos internos; las visitas del taller no cuentan', async () => {
+    const vehiculo = await crearVehiculo(cookiesA);
+    const creado = await http
+      .post('/api/presupuestos')
+      .set('Cookie', cookiesA)
+      .send({
+        vehiculoId: vehiculo.id,
+        notasInternas: 'Pedido secreto a la repuestera',
+        items: [
+          {
+            tipo: 'repuesto',
+            descripcion: 'Filtro de aire',
+            proveedor: 'Repuestera Escondida',
+            unidad: 'u',
+            cantidad: '1',
+            precioCosto: '1000',
+            precioUnitario: '1500',
+          },
+        ],
+      })
+      .expect(201);
+    const id = creado.body.id as string;
+    expect(creado.body.enlace).toBeNull();
+
+    const enlace = await http
+      .post(`/api/presupuestos/${id}/enlace`)
+      .set('Cookie', cookiesA)
+      .expect(200);
+    const token = enlace.body.token as string;
+    expect(token).toMatch(/^[A-Za-z0-9_-]{54}$/);
+    expect(enlace.body.vistas).toBe(0);
+    const otraVez = await http
+      .post(`/api/presupuestos/${id}/enlace`)
+      .set('Cookie', cookiesA)
+      .expect(200);
+    expect(otraVez.body.token).toBe(token);
+
+    const vistas = async () =>
+      (
+        await http
+          .get(`/api/presupuestos/${id}`)
+          .set('Cookie', cookiesA)
+          .expect(200)
+      ).body.enlace as { vistas: number; vistoEn: string | null };
+
+    // El taller probando su propio link: no cuenta como "lo vio el cliente".
+    await http
+      .get(`/api/publico/presupuestos/${token}`)
+      .set('Cookie', cookiesA)
+      .expect(200);
+    expect((await vistas()).vistas).toBe(0);
+
+    // El cliente (sin sesión): ve la hoja, sin costos, proveedor ni notas internas.
+    const publico = await http
+      .get(`/api/publico/presupuestos/${token}`)
+      .expect(200);
+    expect(publico.body.numero).toBe(creado.body.numero);
+    const texto = JSON.stringify(publico.body);
+    for (const interno of [
+      'Repuestera Escondida',
+      'Pedido secreto',
+      'precioCosto',
+      'costoTotal',
+      'notasInternas',
+    ]) {
+      expect(texto).not.toContain(interno);
+    }
+    const despues = await vistas();
+    expect(despues.vistas).toBe(1);
+    expect(despues.vistoEn).not.toBeNull();
+
+    const pdf = await http
+      .get(`/api/publico/presupuestos/${token}/pdf`)
+      .responseType('blob')
+      .expect(200);
+    expect(pdf.headers['content-type']).toContain('application/pdf');
+    expect(pdf.headers['content-disposition']).toContain(
+      `Presupuesto-${creado.body.numeroFormateado}-${vehiculo.patente}.pdf`,
+    );
+    expect((pdf.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
+
+    // Tokens inválidos o cambiados: no existe. Con el id de otro taller adelante, tampoco.
+    const tallerB = (
+      await http.get('/api/auth/me').set('Cookie', cookiesB).expect(200)
+    ).body.taller.id as string;
+    const tallerBEnBase64 = Buffer.from(
+      tallerB.replace(/-/g, ''),
+      'hex',
+    ).toString('base64url');
+    for (const malo of [
+      'cualquier-cosa',
+      `${token.slice(0, 22)}${'A'.repeat(32)}`,
+      `${tallerBEnBase64}${token.slice(22)}`,
+    ]) {
+      await http.get(`/api/publico/presupuestos/${malo}`).expect(404);
+    }
+
+    // PDF con sesión, y otro taller no puede pedirlo ni sacar el enlace.
+    const conSesion = await http
+      .get(`/api/presupuestos/${id}/pdf`)
+      .set('Cookie', cookiesA)
+      .responseType('blob')
+      .expect(200);
+    expect((conSesion.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
+    await http
+      .get(`/api/presupuestos/${id}/pdf`)
+      .set('Cookie', cookiesB)
+      .expect(404);
+    await http
+      .post(`/api/presupuestos/${id}/enlace`)
+      .set('Cookie', cookiesB)
+      .expect(404);
+
+    // Al eliminar el borrador, el enlace deja de funcionar.
+    await http
+      .delete(`/api/presupuestos/${id}`)
+      .set('Cookie', cookiesA)
+      .expect(204);
+    await http.get(`/api/publico/presupuestos/${token}`).expect(404);
+  });
+
   it('el documento para imprimir no expone costos, proveedores ni notas internas', async () => {
     const vehiculo = await crearVehiculo(cookiesA);
     const creado = await http

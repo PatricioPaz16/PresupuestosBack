@@ -11,6 +11,7 @@
 --    2. TalleresPresupuestos     talleres, clientes, vehículos, catálogo, presupuestos,
 --                                triggers de totales y numeración, Row Level Security
 --    3. CerrarAccesoExterno      en Supabase: quita el acceso de la API REST pública
+--    4. EnlacePublico            link del presupuesto para el cliente y cuándo lo abrió
 --  Al final las registra en la tabla de migraciones de TypeORM, así la API no intenta
 --  volver a aplicarlas cuando arranca.
 --
@@ -745,6 +746,60 @@ CREATE POLICY "POL_presupuesto_items_taller" ON presupuesto_items
   USING (taller_id = app_taller_id()) WITH CHECK (taller_id = app_taller_id());
 
 -- =====================================================================================
+--  PARTE 4 — ENLACE PÚBLICO (migración EnlacePublico1792700000000)
+-- =====================================================================================
+
+-- =====================================================================================
+--  Enlace público de cada presupuesto (para mandarlo por WhatsApp sin adjuntar archivos)
+--
+--  El cliente abre /p/<token> sin usuario ni contraseña y ve la misma hoja que se imprime
+--  (sin costos, proveedores ni notas internas), con su PDF.
+--   - El token público lleva adentro el id del taller: la API fija el taller en la
+--     transacción como en cualquier otra operación y busca el enlace con Row Level
+--     Security activa. No hace falta ningún permiso para leer "de todos los talleres".
+--   - visto_en / ultima_vista_en / vistas: cuándo lo abrió el cliente (las visitas de
+--     usuarios del propio taller no cuentan).
+--   - Se borra junto con el presupuesto (solo los borradores se pueden eliminar).
+-- =====================================================================================
+
+CREATE TABLE presupuesto_enlaces (
+  presupuesto_id  uuid        NOT NULL,
+  taller_id       uuid        NOT NULL DEFAULT app_taller_id(),
+  token           text        NOT NULL,   -- parte aleatoria (24 bytes en base64url)
+  creado_en       timestamptz NOT NULL DEFAULT now(),
+  visto_en        timestamptz,            -- primera vez que lo abrió el cliente
+  ultima_vista_en timestamptz,
+  vistas          integer     NOT NULL DEFAULT 0,
+  CONSTRAINT "PK_presupuesto_enlaces" PRIMARY KEY (presupuesto_id),
+  CONSTRAINT "UQ_presupuesto_enlaces_token" UNIQUE (token),
+  CONSTRAINT "FK_presupuesto_enlaces_presupuesto" FOREIGN KEY (taller_id, presupuesto_id)
+    REFERENCES presupuestos (taller_id, id) ON DELETE CASCADE,
+  CONSTRAINT "CHK_presupuesto_enlaces_token"  CHECK (token ~ '^[A-Za-z0-9_-]{32}$'),
+  CONSTRAINT "CHK_presupuesto_enlaces_vistas" CHECK (vistas >= 0)
+);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON presupuesto_enlaces TO presupuestos_app;
+
+ALTER TABLE presupuesto_enlaces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE presupuesto_enlaces FORCE ROW LEVEL SECURITY;
+CREATE POLICY "POL_presupuesto_enlaces_taller" ON presupuesto_enlaces
+  USING (taller_id = app_taller_id()) WITH CHECK (taller_id = app_taller_id());
+
+-- Supabase: que la API REST pública ("anon" / "authenticated") tampoco vea esta tabla.
+DO $$
+DECLARE
+  v_rol text;
+BEGIN
+  FOREACH v_rol IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_rol) THEN
+      EXECUTE format('REVOKE ALL ON TABLE public.presupuesto_enlaces FROM %I', v_rol);
+    END IF;
+  END LOOP;
+END
+$$;
+
+
+-- =====================================================================================
 --  REGISTRO DE MIGRACIONES (para que la API las dé por aplicadas)
 -- =====================================================================================
 CREATE TABLE IF NOT EXISTS typeorm_migrations (
@@ -758,7 +813,8 @@ INSERT INTO typeorm_migrations ("timestamp", name)
 SELECT m.ts, m.nombre
   FROM (VALUES (1747400000000::bigint, 'InitialSchema1747400000000'),
                (1792200000000::bigint, 'TalleresPresupuestos1792200000000'),
-               (1792460000000::bigint, 'CerrarAccesoExterno1792460000000')) AS m (ts, nombre)
+               (1792460000000::bigint, 'CerrarAccesoExterno1792460000000'),
+               (1792700000000::bigint, 'EnlacePublico1792700000000')) AS m (ts, nombre)
  WHERE NOT EXISTS (SELECT 1 FROM typeorm_migrations t WHERE t.name = m.nombre)
  ORDER BY m.ts;
 

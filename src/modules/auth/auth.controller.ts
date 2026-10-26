@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { ThrottlerGuard } from '@nestjs/throttler';
+import { SkipThrottle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -45,6 +45,7 @@ export class AuthController {
   @Public()
   @HttpCode(HttpStatus.OK)
   @UseGuards(ThrottlerGuard)
+  @SkipThrottle({ publico: true })
   @Post('login')
   @ApiOperation({
     summary: 'Login',

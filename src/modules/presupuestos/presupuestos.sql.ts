@@ -76,7 +76,11 @@ export const SQL_DETALLE = `
                        'cantidad', i.cantidad::text, 'precioCosto', i.precio_costo::text,
                        'precioUnitario', i.precio_unitario::text, 'subtotal', i.subtotal::text)
                      ORDER BY i.posicion)
-                FROM presupuesto_items i WHERE i.presupuesto_id = p.id), '[]'::json)
+                FROM presupuesto_items i WHERE i.presupuesto_id = p.id), '[]'::json),
+           'enlace', (SELECT json_build_object(
+                         'vistoEn', e.visto_en, 'ultimaVistaEn', e.ultima_vista_en,
+                         'vistas', e.vistas)
+                        FROM presupuesto_enlaces e WHERE e.presupuesto_id = p.id)
          ) AS dto
     FROM presupuestos p
    WHERE p.id = $1`;

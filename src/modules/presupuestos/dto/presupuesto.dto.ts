@@ -299,6 +299,17 @@ export interface PresupuestoDetalleDto {
   cliente: ClienteDto;
   vehiculo: VehiculoEnPresupuestoDto;
   items: PresupuestoItemDetalleDto[];
+  /** Enlace público: cuándo lo abrió el cliente. null si todavía no se generó. */
+  enlace: Omit<EnlacePublicoDto, 'token'> | null;
+}
+
+export interface EnlacePublicoDto {
+  /** Para armar el link: <dominio del front>/p/<token>. */
+  token: string;
+  /** Primera vez que lo abrió el cliente (las visitas del propio taller no cuentan). */
+  vistoEn: string | null;
+  ultimaVistaEn: string | null;
+  vistas: number;
 }
 
 export interface PresupuestoResumenDto {

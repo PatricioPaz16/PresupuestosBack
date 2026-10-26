@@ -336,10 +336,31 @@ de vencimiento ya reemplazadas, y la leyenda "Documento no válido como factura.
 internas, el costo total y la ganancia no están en ese DTO: no hay forma de que la vista de
 impresión o el mensaje de WhatsApp los muestren por error.
 
-- **Imprimir / PDF:** página A4 propia (`@page`, numeración de páginas), botón
-  "Imprimir / Guardar PDF" y nombre de archivo sugerido "Presupuesto 00124 - AB123CD - Taller".
-- **WhatsApp:** abre `wa.me/<teléfono E.164>` con el resumen (ítems, total, validez). Si
-  estaba en borrador, lo pasa a enviado.
+- **Imprimir:** página A4 propia (`@page`, numeración de páginas) y nombre de archivo
+  sugerido "Presupuesto 00124 - AB123CD - Taller".
+- **PDF real** (`GET /presupuestos/:id/pdf`): lo arma el servidor con pdfmake, con el mismo
+  diseño y las mismas fuentes (IBM Plex) que la hoja de la pantalla, a partir del mismo DTO.
+  pdfmake no puede leer archivos ni bajar nada de internet (las fuentes van en memoria y el
+  logo solo se acepta como PNG/JPEG en data URL).
+- **Enlace para el cliente** (`POST /presupuestos/:id/enlace` → `<front>/p/<token>`): el
+  cliente lo abre sin usuario, ve la hoja y baja el PDF. Tabla `presupuesto_enlaces`
+  (migración `EnlacePublico`), borrado en cascada con el presupuesto.
+  - El token (54 caracteres) es el id del taller más 24 bytes aleatorios. La API abre la
+    transacción dentro de ese taller y busca el enlace con RLS, como cualquier consulta:
+    no hay ningún permiso para leer "de todos los talleres". Con otro id de taller adelante,
+    el enlace no existe.
+  - Registra la primera y la última vez que lo abrió el cliente y cuántas veces. No cuenta
+    la descarga del PDF ni las visitas de usuarios del propio taller con la sesión abierta
+    en ese navegador (se reconoce su cookie de acceso, que dura 15 minutos). Abierto desde
+    un navegador sin sesión (por ejemplo, el celular del dueño), cuenta como una visita más.
+  - Límite de 60 pedidos por minuto por IP; si el taller está desactivado, el enlace no
+    funciona.
+- **WhatsApp:** abre `wa.me/<teléfono E.164>` con el saludo, el total, la validez y el link.
+  Si el link no se pudiera generar, manda el resumen con los ítems. Si estaba en borrador,
+  lo pasa a enviado.
+- **Compartir PDF (celular):** el navegador baja el PDF y abre el menú de compartir del
+  teléfono (Web Share API) para mandarlo como archivo por WhatsApp, WhatsApp Business o
+  mail. En la PC, "Descargar PDF".
 
 ---
 
@@ -369,15 +390,18 @@ impresión o el mensaje de WhatsApp los muestren por error.
 | Logo en la base (data URL) | Archivos en disco o S3 | Un archivo chico; cero infraestructura extra |
 | Normalizar patente y teléfono al guardar | Guardar como se tipeó | Búsquedas exactas, WhatsApp sin errores |
 | Baja lógica (`archivado_en`) de clientes y vehículos | Borrar | Los presupuestos los referencian; la patente queda reservada y se puede revertir |
+| PDF en el servidor con pdfmake | Chromium sin pantalla (Puppeteer) | Mismo diseño sin cargar un navegador entero en un servidor de 512 MB |
+| Taller dentro del token del enlace público | Función que saltee RLS para buscar el token | El enlace se resuelve con el mismo aislamiento que el resto de la API |
 
 ---
 
 ## 12. Para una versión siguiente
 
 - Panel web del dueño de la plataforma para crear y suspender talleres.
-- Link público para que el cliente vea y apruebe el presupuesto desde el celular.
+- Facturación electrónica con ARCA (presupuesto aprobado → factura con CAE y QR).
+- Que el cliente apruebe o rechace el presupuesto desde el link.
 - Orden de trabajo a partir de un presupuesto aprobado (horas reales, repuestos usados).
-- Envío por email con el PDF adjunto (hoy: imprimir/guardar PDF y WhatsApp).
+- Envío por email con el PDF adjunto (hoy: link y PDF por WhatsApp).
 - Fotos del vehículo o del daño adjuntas al presupuesto.
 - Paquetes de ítems ("Service 10.000 km") que se agregan de una.
 - Historial de precios por repuesto y por proveedor.

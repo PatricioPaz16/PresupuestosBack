@@ -13,6 +13,7 @@ import {
 } from '../../common/constants/dominio.constant';
 import {
   escaparLike,
+  filasDe,
   patronesPorPalabra,
   vacioANull,
 } from '../../common/database/sql.util';
@@ -23,6 +24,7 @@ import {
   ActualizarPresupuestoDto,
   CambiarEstadoDto,
   DocumentoItemDto,
+  EnlacePublicoDto,
   GuardarPresupuestoDto,
   ListarPresupuestosQuery,
   PaginaPresupuestosDto,
@@ -38,6 +40,14 @@ import {
   SQL_ITEMS_BORRAR,
   SQL_ITEMS_INSERTAR,
 } from './presupuestos.sql';
+import {
+  armarTokenPublico,
+  leerTokenPublico,
+  nuevaParteAleatoria,
+} from './publico/token-publico';
+
+const ENLACE_NO_DISPONIBLE =
+  'Este presupuesto no está disponible. Pedile al taller que te lo vuelva a enviar.';
 
 const NOMBRES_ESTADO: Record<EstadoPresupuesto, string> = {
   borrador: 'borrador',
@@ -175,12 +185,84 @@ export class PresupuestosService {
     return this.conAutor(tallerId, detalle);
   }
 
-  async documento(
-    tallerId: string,
+  documento(tallerId: string, id: string): Promise<PresupuestoDocumentoDto> {
+    return this.tenant.run(tallerId, (em) => this.documentoEn(em, id));
+  }
+
+  /** Enlace público para mandarle al cliente (se crea la primera vez que se pide). */
+  enlace(tallerId: string, id: string): Promise<EnlacePublicoDto> {
+    return this.tenant.run(tallerId, async (em) => {
+      const [existe] = await em.query<Array<{ id: string }>>(
+        `SELECT id FROM presupuestos WHERE id = $1`,
+        [id],
+      );
+      if (!existe) {
+        throw new NotFoundException('Presupuesto no encontrado.');
+      }
+      await em.query(
+        `INSERT INTO presupuesto_enlaces (presupuesto_id, token) VALUES ($1, $2)
+         ON CONFLICT (presupuesto_id) DO NOTHING`,
+        [id, nuevaParteAleatoria()],
+      );
+      const [fila] = await em.query<
+        Array<Omit<EnlacePublicoDto, 'token'> & { token: string }>
+      >(
+        `SELECT token, visto_en AS "vistoEn", ultima_vista_en AS "ultimaVistaEn", vistas
+           FROM presupuesto_enlaces
+          WHERE presupuesto_id = $1`,
+        [id],
+      );
+      return { ...fila, token: armarTokenPublico(tallerId, fila.token) };
+    });
+  }
+
+  /**
+   * Hoja del presupuesto para el enlace público (sin usuario ni contraseña). El token trae
+   * el taller: la consulta corre dentro de ese taller, con Row Level Security, como todas.
+   * `contarVista` es false cuando lo abre alguien del propio taller.
+   */
+  documentoPublico(
+    token: string,
+    contarVista: boolean,
+  ): Promise<PresupuestoDocumentoDto> {
+    const datos = leerTokenPublico(token);
+    if (!datos) {
+      return Promise.reject(new NotFoundException(ENLACE_NO_DISPONIBLE));
+    }
+    return this.tenant.run(datos.tallerId, async (em) => {
+      const [taller] = await em.query<Array<{ activo: boolean }>>(
+        `SELECT activo FROM talleres WHERE id = $1`,
+        [datos.tallerId],
+      );
+      if (!taller?.activo) {
+        throw new NotFoundException(ENLACE_NO_DISPONIBLE);
+      }
+      const [enlace] = filasDe<{ presupuestoId: string }>(
+        await em.query(
+          contarVista
+            ? `UPDATE presupuesto_enlaces
+                  SET visto_en = coalesce(visto_en, now()), ultima_vista_en = now(),
+                      vistas = vistas + 1
+                WHERE token = $1
+            RETURNING presupuesto_id AS "presupuestoId"`
+            : `SELECT presupuesto_id AS "presupuestoId" FROM presupuesto_enlaces WHERE token = $1`,
+          [datos.aleatorio],
+        ),
+      );
+      if (!enlace) {
+        throw new NotFoundException(ENLACE_NO_DISPONIBLE);
+      }
+      return this.documentoEn(em, enlace.presupuestoId);
+    });
+  }
+
+  private async documentoEn(
+    em: EntityManager,
     id: string,
   ): Promise<PresupuestoDocumentoDto> {
-    const [fila] = await this.tenant.run(tallerId, (em) =>
-      em.query<Array<{ dto: DocumentoCrudo }>>(SQL_DOCUMENTO, [id]),
+    const [fila] = await em.query<Array<{ dto: DocumentoCrudo }>>(
+      SQL_DOCUMENTO,
+      [id],
     );
     if (!fila) {
       throw new NotFoundException('Presupuesto no encontrado.');

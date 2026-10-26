@@ -78,6 +78,8 @@ El detalle de cada body/respuesta está en Swagger.
 | GET | `/presupuestos` | Sesión | Listado con búsqueda (`q`), `estado`, paginado |
 | GET | `/presupuestos/:id` | Sesión | Detalle completo (incluye datos internos) |
 | GET | `/presupuestos/:id/documento` | Sesión | Versión para imprimir/enviar: **sin** costos, proveedor ni notas internas |
+| GET | `/presupuestos/:id/pdf` | Sesión | El PDF del presupuesto (el mismo que recibe el cliente) |
+| POST | `/presupuestos/:id/enlace` | Sesión | Link para el cliente (`<front>/p/<token>`), se crea la primera vez; dice cuándo lo abrió |
 | POST | `/presupuestos` | Sesión | Crea (el número y los totales los pone la base) |
 | PUT | `/presupuestos/:id` | Sesión | Reemplaza cabecera e ítems (requiere `version`) |
 | PATCH | `/presupuestos/:id/estado` | Sesión | Cambia el estado (borrador / enviado / aprobado / rechazado) |
@@ -95,9 +97,12 @@ El detalle de cada body/respuesta está en Swagger.
 | GET / POST / PATCH | `/catalogo`, `/catalogo/:id` | Sesión | Repuestos y trabajos frecuentes |
 | POST | `/catalogo/ajuste-precios` | ADMIN | Aumento masivo por porcentaje, con redondeo |
 | GET / POST / PATCH | `/users`, `/users/:id` | ADMIN | Usuarios del propio taller |
+| GET | `/publico/presupuestos/:token` | Público** | Hoja del presupuesto para el cliente (sin datos internos); registra que lo abrió |
+| GET | `/publico/presupuestos/:token/pdf` | Público** | PDF para el cliente |
 | GET | `/health`, `/health/ready` | Público | Liveness / readiness (con ping a la base) |
 
 \* Requiere la cookie `refresh_token`.
+\*\* Con el token del enlace (imposible de adivinar) y límite de 60 pedidos por minuto por IP.
 
 Los importes viajan como **texto con punto decimal** (`"12345.67"`), nunca como número de
 coma flotante. Errores de base de datos frecuentes (patente repetida, presupuesto editado
@@ -209,7 +214,7 @@ src/
 │   ├── clientes/        # Listado, ficha, alta/baja
 │   ├── vehiculos/       # Búsqueda, alta rápida, alta/baja y cambio de dueño
 │   ├── catalogo/        # Repuestos y trabajos frecuentes
-│   ├── presupuestos/    # Alta, edición, estados, documento imprimible
+│   ├── presupuestos/    # Alta, edición, estados, documento, PDF y enlace público
 │   └── health/
 └── scripts/crear-taller.ts
 ```

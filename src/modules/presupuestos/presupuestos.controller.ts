@@ -11,8 +11,14 @@ import {
   Post,
   Put,
   Query,
+  StreamableFile,
 } from '@nestjs/common';
-import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiCookieAuth,
+  ApiOperation,
+  ApiProduces,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ACCESS_TOKEN_COOKIE } from '../../common/constants/roles.enum';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { TallerId } from '../../common/decorators/taller-id.decorator';
@@ -20,19 +26,24 @@ import { User } from '../users/entities/user.entity';
 import {
   ActualizarPresupuestoDto,
   CambiarEstadoDto,
+  EnlacePublicoDto,
   GuardarPresupuestoDto,
   ListarPresupuestosQuery,
   PaginaPresupuestosDto,
   PresupuestoDetalleDto,
   PresupuestoDocumentoDto,
 } from './dto/presupuesto.dto';
+import { PresupuestoPdfService } from './pdf/presupuesto-pdf.service';
 import { PresupuestosService } from './presupuestos.service';
 
 @ApiTags('presupuestos')
 @ApiCookieAuth(ACCESS_TOKEN_COOKIE)
 @Controller('presupuestos')
 export class PresupuestosController {
-  constructor(private readonly presupuestos: PresupuestosService) {}
+  constructor(
+    private readonly presupuestos: PresupuestosService,
+    private readonly pdf: PresupuestoPdfService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -66,6 +77,38 @@ export class PresupuestosController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<PresupuestoDocumentoDto> {
     return this.presupuestos.documento(tallerId, id);
+  }
+
+  @Get(':id/pdf')
+  @ApiProduces('application/pdf')
+  @ApiOperation({
+    summary:
+      'PDF del presupuesto (el mismo que recibe el cliente). Sin datos internos.',
+  })
+  async archivo(
+    @TallerId() tallerId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<StreamableFile> {
+    const doc = await this.presupuestos.documento(tallerId, id);
+    const nombre = this.pdf.nombreArchivo(doc);
+    return new StreamableFile(await this.pdf.generar(doc), {
+      type: 'application/pdf',
+      disposition: `inline; filename="${nombre}"`,
+    });
+  }
+
+  @Post(':id/enlace')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Enlace público para el cliente (se crea la primera vez)',
+    description:
+      'El link es <front>/p/<token>. Muestra la hoja y el PDF sin iniciar sesión, sin datos internos.',
+  })
+  enlace(
+    @TallerId() tallerId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<EnlacePublicoDto> {
+    return this.presupuestos.enlace(tallerId, id);
   }
 
   @Post()

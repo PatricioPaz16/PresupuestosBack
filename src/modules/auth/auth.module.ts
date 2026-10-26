@@ -27,6 +27,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
             ttl: configService.get<number>('throttle.loginTtlMs', 60000),
             limit: configService.get<number>('throttle.loginLimit', 5),
           },
+          // Enlace público del presupuesto (lo abre el cliente desde WhatsApp).
+          { name: 'publico', ttl: 60000, limit: 60 },
         ],
       }),
     }),
